@@ -19,13 +19,20 @@ Flow
 ----
   1. Frontend opens WS connection.
   2. Frontend sends   { "type": "start", "verse_id": "55:1-8", "use_case": 1 }
-     • use_case  1 = smooth recitation – 1 diacritic error + 1 incorrect word
-     • use_case  2 = user repeats ayah 1 before continuing
-     • use_case  3 = user skips ayah 2 entirely
-     • use_case  4 = heavy harakat mistakes (3 diacritic + 2 vowel errors)
-     • use_case  5 = letter-level mistakes (2 consonant substitutions + 2 vowel errors)
-     • use_case  6 = mixed mistakes (1 incorrect + 1 letter + 1 diacritic + 1 vowel error)
-     • use_case  7 = heavy mixed mistakes (1 incorrect + 1 letter + 2 diacritic + 1 vowel error)
+     • use_case  1 = mixed: 1 vowel + 1 letter + 1 diacritic + 1 incorrect  (4 mistakes)
+     • use_case  2 = repeat ayah 1 + 1 diacritic + 1 vowel error             (2 mistakes)
+     • use_case  3 = skip ayah 2 + 1 diacritic + 1 letter error              (2 mistakes)
+     • use_case  4 = heavy: 1 letter + 3 diacritic + 2 vowel + 1 incorrect   (7 mistakes)
+     • use_case  5 = letter focus: 2 letter + 2 vowel + 1 diacritic + 1 incr (6 mistakes)
+     • use_case  6 = mixed moderate: 1 incr + 1 letter + 2 diac + 2 vowel    (6 mistakes)
+     • use_case  7 = mixed heavy: 2 incr + 1 letter + 2 diac + 2 vowel       (7 mistakes)
+     • use_case  8 = severe: 2 incr + 2 letter + 2 diac + 1 vowel            (7 mistakes)
+     • use_case  9 = extreme: 1 incr + 3 letter + 2 diac + 2 vowel           (8 mistakes)
+
+     Each session_summary contains:
+       • "letter_mistakes" – diacritic/vowel/letter errors with word_position + letter_feedback
+       • "word_mistakes"   – incorrect words with word_position reference
+       • "mistakes"        – flat combined list (backward-compat)
   3. Server replies with a  status  message.
   4. Frontend sends  { "type": "audio", "audio": "<base64>" }  (one per ~2-second chunk).
      • The server accumulates the raw audio bytes from every chunk.
@@ -227,7 +234,7 @@ async def ws_recitation(websocket: WebSocket):
                 if use_case not in md.CASE_DATA:
                     await websocket.send_json({
                         "type": "error",
-                        "message": f"Unknown use_case '{use_case}'. Valid values: 1, 2, 3, 4, 5, 6, 7",
+                        "message": f"Unknown use_case '{use_case}'. Valid values: 1–9",
                     })
                     continue
 

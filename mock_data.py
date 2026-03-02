@@ -1,13 +1,15 @@
 """
-Mock response data for all 7 test cases.
+Mock response data for all 9 test cases.
 
-Case 1 – Smooth recitation: 1 diacritic error + 1 incorrect word.
-Case 2 – User repeats Ayah 1 before continuing (perfect otherwise).
-Case 3 – User skips Ayah 2 and jumps directly to Ayah 3.
-Case 4 – Heavy harakat mistakes: 3 diacritic errors + 2 vowel errors.
-Case 5 – Letter-level mistakes: 2 consonant substitutions + 2 vowel errors.
-Case 6 – Mixed mistakes: 1 incorrect word + 1 letter error + 1 diacritic error + 1 vowel error.
-Case 7 – Heavy mixed mistakes: 1 incorrect word + 1 letter error + 2 diacritic errors + 1 vowel error.
+Case 1 – Smooth recitation:          1 vowel error + 1 letter error + 1 diacritic + 1 incorrect word
+Case 2 – Repeat + mistakes:          user repeats Ayah 1 + 1 diacritic + 1 vowel error
+Case 3 – Skip + mistakes:            user skips Ayah 2 + 1 diacritic + 1 letter error
+Case 4 – Heavy harakat + extra:      3 diacritic + 2 vowel + 1 letter + 1 incorrect (7 mistakes)
+Case 5 – Letter mistakes + extra:    2 letter + 2 vowel + 1 diacritic + 1 incorrect (6 mistakes)
+Case 6 – Mixed (moderate):           1 incorrect + 1 letter + 2 diacritic + 2 vowel (6 mistakes)
+Case 7 – Mixed (heavy):              2 incorrect + 1 letter + 2 diacritic + 2 vowel (7 mistakes)
+Case 8 – Severe multi-type:          2 incorrect + 2 letter + 2 diacritic + 1 vowel (7 mistakes)
+Case 9 – Extreme chaos:              1 incorrect + 3 letter + 2 diacritic + 2 vowel (8 mistakes)
 
 Word-feedback status values
 ───────────────────────────
@@ -20,14 +22,20 @@ Word-feedback status values
   "letter_error"   – a specific consonant letter substituted (e.g. خ → ح)
   "not_recited"    – word not reached yet
 
-Words with "vowel_error" or "letter_error" carry an extra letter_feedback
-list that pins the mistake to the exact letter position.
+Summary structure
+─────────────────
+  Each session_summary contains:
+  • "letter_mistakes"  – list of diacritic_error / vowel_error / letter_error entries,
+                         each with word_position (0-based verse index) and full
+                         letter_feedback array pinning the error to the exact letter pos.
+  • "word_mistakes"    – list of incorrect entries, each with word_position reference.
+  • "mistakes"         – flat combined list (backward-compat shorthand).
 """
 
 import base64
 import math
 import struct
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Word list  (Surah Ar-Rahman 55:1–8 · 21 words)
@@ -71,14 +79,10 @@ _RECITED = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _make_mock_wav(freq_hz: float = 440.0, duration_ms: int = 1000) -> str:
-    """Return a base64-encoded 16 kHz mono 16-bit PCM WAV sine-wave tone.
-
-    Each use-case gets a distinct pitch so the frontend developer can
-    audibly tell which session is playing.
-    """
+    """Return a base64-encoded 16 kHz mono 16-bit PCM WAV sine-wave tone."""
     sample_rate = 16000
     n_samples = int(sample_rate * duration_ms / 1000)
-    amplitude = 8000  # safe level, well below 16-bit saturation (32767)
+    amplitude = 8000
 
     pcm = bytearray()
     for i in range(n_samples):
@@ -89,40 +93,38 @@ def _make_mock_wav(freq_hz: float = 440.0, duration_ms: int = 1000) -> str:
     header = struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF", 36 + data_size, b"WAVE",
-        b"fmt ", 16,        # PCM subchunk size
-        1,                  # AudioFormat = PCM
-        1,                  # NumChannels = mono
-        sample_rate,        # SampleRate
-        sample_rate * 2,    # ByteRate = SampleRate * BlockAlign
-        2,                  # BlockAlign = channels * bits/8
-        16,                 # BitsPerSample
+        b"fmt ", 16, 1, 1,
+        sample_rate, sample_rate * 2, 2, 16,
         b"data", data_size,
     )
     return base64.b64encode(header + bytes(pcm)).decode("ascii")
 
 
-# Pre-computed per-case WAVs (different pitches — A4, C5, G4, F4, D4, C4, E4)
+# Pre-computed per-case WAVs (distinct pitches A4→B3)
 MOCK_WAVS: Dict[int, str] = {
-    1: _make_mock_wav(440.0),   # A4 – Case 1
-    2: _make_mock_wav(523.25),  # C5 – Case 2
-    3: _make_mock_wav(392.0),   # G4 – Case 3
-    4: _make_mock_wav(349.23),  # F4 – Case 4
-    5: _make_mock_wav(293.66),  # D4 – Case 5
-    6: _make_mock_wav(261.63),  # C4 – Case 6
-    7: _make_mock_wav(329.63),  # E4 – Case 7
+    1: _make_mock_wav(440.00),   # A4
+    2: _make_mock_wav(523.25),   # C5
+    3: _make_mock_wav(392.00),   # G4
+    4: _make_mock_wav(349.23),   # F4
+    5: _make_mock_wav(293.66),   # D4
+    6: _make_mock_wav(261.63),   # C4
+    7: _make_mock_wav(329.63),   # E4
+    8: _make_mock_wav(246.94),   # B3
+    9: _make_mock_wav(220.00),   # A3
 }
+
 
 def _recording(case_num: int, duration_seconds: int) -> Dict[str, Any]:
     """Build the recording metadata block for a session_summary."""
     wav_b64 = MOCK_WAVS[case_num]
     size_bytes = len(base64.b64decode(wav_b64))
     return {
-        "audio_data":    wav_b64,
-        "audio_format":  "wav",
+        "audio_data":       wav_b64,
+        "audio_format":     "wav",
         "audio_size_bytes": size_bytes,
         "duration_seconds": duration_seconds,
-        "filename":      f"recitation_case_{case_num}.wav",
-        "download_url":  f"/api/recordings/{case_num}",
+        "filename":         f"recitation_case_{case_num}.wav",
+        "download_url":     f"/api/recordings/{case_num}",
     }
 
 
@@ -136,7 +138,6 @@ def _wf(cursor: int, overrides: Optional[Dict] = None, skipped: Optional[Any] = 
     cursor    – last word index reached (inclusive, 0-based)
     overrides – {index: (status, recited_text)}
                      or {index: (status, recited_text, letter_feedback)}
-                for non-correct entries.
     skipped   – iterable of word indices that stay not_recited even if ≤ cursor
     """
     overrides = overrides or {}
@@ -170,6 +171,13 @@ def _wf(cursor: int, overrides: Optional[Dict] = None, skipped: Optional[Any] = 
 def _txt(indices) -> str:
     """Join word texts at the given indices into a transcription string."""
     return " ".join(WORDS[i]["text"] for i in indices)
+
+
+def _split_mistakes(mistakes: List[Dict]):
+    """Return (letter_mistakes, word_mistakes) from a flat list."""
+    letter = [m for m in mistakes if m["type"] != "incorrect"]
+    word   = [m for m in mistakes if m["type"] == "incorrect"]
+    return letter, word
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -224,16 +232,55 @@ VERSE_RESPONSE = [
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Letter-feedback arrays  (one per word that has a vowel/letter error)
-# ─────────────────────────────────────────────────────────────────────────────
-#
+# Letter-feedback arrays
 # Each entry: { position, expected_letter, recited_letter, status }
 # status values: "correct" | "diacritic_error" | "vowel_error" | "letter_error"
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Naming convention:  _LF_W{word_index}_{TYPE}_{CASE}
+#   word_index  = 0-based position in WORDS
+#   TYPE        = DIAC | VOWEL | LETTER
+#   CASE        = case number(s) that use it
+#
+# Arrays shared by multiple cases are defined once and reused.
 
-# ── Case 4 letter feedback ────────────────────────────────────────────────────
+# ── word 0 · الرَّحْمَٰنُ ───────────────────────────────────────────────────
+# letters: ["ا","ل","ر","َّ","ح","ْ","م","َ","ٰ","ن","ُ"]
 
-# Word 1 · عَلَّمَ  → "عَلَمَ"  (shadda on lam dropped)
+# Cases 4, 8  – letter_error: ح (pos 4) → خ
+_LF_W0_LETTER = [
+    {"position": 0,  "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 1,  "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 2,  "expected_letter": "ر",  "recited_letter": "ر",  "status": "correct"},
+    {"position": 3,  "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4,  "expected_letter": "ح",  "recited_letter": "خ",  "status": "letter_error"},
+    {"position": 5,  "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
+    {"position": 6,  "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 7,  "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 8,  "expected_letter": "ٰ",  "recited_letter": "ٰ",  "status": "correct"},
+    {"position": 9,  "expected_letter": "ن",  "recited_letter": "ن",  "status": "correct"},
+    {"position": 10, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# Case 8 – diacritic_error: shadda on رَّ (pos 3) dropped → "الرَحْمَٰنُ"
+_LF_W0_DIAC = [
+    {"position": 0,  "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 1,  "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 2,  "expected_letter": "ر",  "recited_letter": "ر",  "status": "correct"},
+    {"position": 3,  "expected_letter": "َّ", "recited_letter": "َ",  "status": "diacritic_error"},
+    {"position": 4,  "expected_letter": "ح",  "recited_letter": "ح",  "status": "correct"},
+    {"position": 5,  "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
+    {"position": 6,  "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 7,  "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 8,  "expected_letter": "ٰ",  "recited_letter": "ٰ",  "status": "correct"},
+    {"position": 9,  "expected_letter": "ن",  "recited_letter": "ن",  "status": "correct"},
+    {"position": 10, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# ── word 1 · عَلَّمَ ─────────────────────────────────────────────────────────
 # letters: ["ع","َ","ل","َّ","م","َ"]
+
+# Cases 4, 5, 9  – diacritic_error: shadda on لَّ (pos 3) dropped → "عَلَمَ"
 _LF_W1_DIAC = [
     {"position": 0, "expected_letter": "ع",  "recited_letter": "ع",  "status": "correct"},
     {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
@@ -243,8 +290,78 @@ _LF_W1_DIAC = [
     {"position": 5, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
 ]
 
-# Word 5 · عَلَّمَهُ  → "عَلَّمَه"  (damma on hā dropped)
+# ── word 2 · الْقُرْآنَ ───────────────────────────────────────────────────────
+# letters: ["ا","ل","ْ","ق","ُ","ر","ْ","آ","ن","َ"]
+
+# Cases 6  – diacritic_error: sukūn on رْ (pos 6) dropped → "الْقُرَآنَ"
+_LF_W2_DIAC = [
+    {"position": 0, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3, "expected_letter": "ق", "recited_letter": "ق", "status": "correct"},
+    {"position": 4, "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+    {"position": 5, "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
+    {"position": 6, "expected_letter": "ْ", "recited_letter": "",  "status": "diacritic_error"},
+    {"position": 7, "expected_letter": "آ", "recited_letter": "آ", "status": "correct"},
+    {"position": 8, "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 9, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# ── word 3 · خَلَقَ ──────────────────────────────────────────────────────────
+# letters: ["خ","َ","ل","َ","ق","َ"]
+
+# Cases 1  – vowel_error: fatha on خ (pos 1) → kasra → "خِلَقَ"
+_LF_W3_VOWEL = [
+    {"position": 0, "expected_letter": "خ", "recited_letter": "خ", "status": "correct"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "ِ", "status": "vowel_error"},
+    {"position": 2, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 3, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 4, "expected_letter": "ق", "recited_letter": "ق", "status": "correct"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# Cases 5, 9  – letter_error: خ (pos 0) → ح → "حَلَقَ"
+_LF_W3_LETTER = [
+    {"position": 0, "expected_letter": "خ", "recited_letter": "ح", "status": "letter_error"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 3, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 4, "expected_letter": "ق", "recited_letter": "ق", "status": "correct"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# Case 7  – vowel_error: fatha on ل (pos 3) → damma → "خَلُقَ"
+_LF_W3_VOWEL_C7 = [
+    {"position": 0, "expected_letter": "خ", "recited_letter": "خ", "status": "correct"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 3, "expected_letter": "َ", "recited_letter": "ُ", "status": "vowel_error"},
+    {"position": 4, "expected_letter": "ق", "recited_letter": "ق", "status": "correct"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# ── word 4 · الْإِنسَانَ ──────────────────────────────────────────────────────
+# letters: ["ا","ل","ْ","إ","ِ","ن","س","َ","ا","ن","َ"]
+
+# Case 9  – letter_error: ن (pos 5) → م → "الْإِمسَانَ"
+_LF_W4_LETTER = [
+    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3,  "expected_letter": "إ", "recited_letter": "إ", "status": "correct"},
+    {"position": 4,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+    {"position": 5,  "expected_letter": "ن", "recited_letter": "م", "status": "letter_error"},
+    {"position": 6,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# ── word 5 · عَلَّمَهُ ────────────────────────────────────────────────────────
 # letters: ["ع","َ","ل","َّ","م","َ","ه","ُ"]
+
+# Cases 4  – diacritic_error: damma on هُ (pos 7) dropped → "عَلَّمَه"
 _LF_W5_DIAC = [
     {"position": 0, "expected_letter": "ع",  "recited_letter": "ع",  "status": "correct"},
     {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
@@ -256,67 +373,107 @@ _LF_W5_DIAC = [
     {"position": 7, "expected_letter": "ُ",  "recited_letter": "",   "status": "diacritic_error"},
 ]
 
-# Word 12 · يَسْجُدَانِ  → "يَسْجُدَانَ"  (kasra on nūn → fatha)
-# letters: ["ي","َ","س","ْ","ج","ُ","د","َ","ا","ن","ِ"]
-_LF_W12_DIAC = [
-    {"position": 0,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
-    {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 2,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
-    {"position": 3,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
-    {"position": 4,  "expected_letter": "ج", "recited_letter": "ج", "status": "correct"},
-    {"position": 5,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
-    {"position": 6,  "expected_letter": "د", "recited_letter": "د", "status": "correct"},
-    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
-    {"position": 10, "expected_letter": "ِ", "recited_letter": "َ", "status": "vowel_error"},
+# Case 8  – letter_error: ه (pos 6) → ح → "عَلَّمَحُ"
+_LF_W5_LETTER = [
+    {"position": 0, "expected_letter": "ع",  "recited_letter": "ع",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 5, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 6, "expected_letter": "ه",  "recited_letter": "ح",  "status": "letter_error"},
+    {"position": 7, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
 ]
 
-# Word 14 · رَفَعَهَا  → "رُفِعَهَا"  (fatha on rā → damma; fatha on fā → kasra)
-# letters: ["ر","َ","ف","َ","ع","َ","ه","َ","ا"]
-_LF_W14_VOWEL = [
-    {"position": 0, "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
-    {"position": 1, "expected_letter": "َ", "recited_letter": "ُ", "status": "vowel_error"},
-    {"position": 2, "expected_letter": "ف", "recited_letter": "ف", "status": "correct"},
-    {"position": 3, "expected_letter": "َ", "recited_letter": "ِ", "status": "vowel_error"},
-    {"position": 4, "expected_letter": "ع", "recited_letter": "ع", "status": "correct"},
-    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 6, "expected_letter": "ه", "recited_letter": "ه", "status": "correct"},
-    {"position": 7, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 8, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+# Case 9  – vowel_error: damma on هُ (pos 7) → kasra → "عَلَّمَهِ"
+_LF_W5_VOWEL = [
+    {"position": 0, "expected_letter": "ع",  "recited_letter": "ع",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 5, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 6, "expected_letter": "ه",  "recited_letter": "ه",  "status": "correct"},
+    {"position": 7, "expected_letter": "ُ",  "recited_letter": "ِ",  "status": "vowel_error"},
 ]
 
-# Word 16 · الْمِيزَانَ  → "الْمَيزَانَ"  (kasra on mīm → fatha)
-# letters: ["ا","ل","ْ","م","ِ","ي","ز","َ","ا","ن","َ"]
-_LF_W16_VOWEL = [
-    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
-    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
-    {"position": 3,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
-    {"position": 4,  "expected_letter": "ِ", "recited_letter": "َ", "status": "vowel_error"},
-    {"position": 5,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
-    {"position": 6,  "expected_letter": "ز", "recited_letter": "ز", "status": "correct"},
-    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
-    {"position": 10, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+# ── word 6 · الْبَيَانَ ───────────────────────────────────────────────────────
+# letters: ["ا","ل","ْ","ب","َ","ي","َ","ا","ن","َ"]
+
+# Case 2  – diacritic_error: sukūn on لْ (pos 2) dropped → "الَبَيَانَ"
+_LF_W6_DIAC = [
+    {"position": 0, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2, "expected_letter": "ْ", "recited_letter": "",  "status": "diacritic_error"},
+    {"position": 3, "expected_letter": "ب", "recited_letter": "ب", "status": "correct"},
+    {"position": 4, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 5, "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 6, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 7, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 8, "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 9, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
 ]
 
-# ── Case 5 letter feedback ────────────────────────────────────────────────────
-
-# Word 3 · خَلَقَ  → "حَلَقَ"  (kha خ substituted by ha ح)
-# letters: ["خ","َ","ل","َ","ق","َ"]
-_LF_W3_LETTER = [
-    {"position": 0, "expected_letter": "خ", "recited_letter": "ح", "status": "letter_error"},
-    {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 2, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
-    {"position": 3, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 4, "expected_letter": "ق", "recited_letter": "ق", "status": "correct"},
-    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+# Cases 7  – letter_error: ب (pos 3) → ف → "الْفَيَانَ"
+_LF_W6_LETTER = [
+    {"position": 0, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3, "expected_letter": "ب", "recited_letter": "ف", "status": "letter_error"},
+    {"position": 4, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 5, "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 6, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 7, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 8, "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 9, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
 ]
 
-# Word 8 · وَالْقَمَرُ  → "وَالْغَمَرُ"  (qāf ق substituted by ghain غ)
+# ── word 7 · الشَّمْسُ ────────────────────────────────────────────────────────
+# letters: ["ا","ل","ش","َّ","م","ْ","س","ُ"]
+
+# Case 1  – letter_error: س (pos 6) → ص → "الشَّمْصُ"
+_LF_W7_LETTER = [
+    {"position": 0, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 1, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 2, "expected_letter": "ش",  "recited_letter": "ش",  "status": "correct"},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 5, "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
+    {"position": 6, "expected_letter": "س",  "recited_letter": "ص",  "status": "letter_error"},
+    {"position": 7, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# Cases 6  – letter_error: ش (pos 2) → ص → "الصَّمْسُ"
+_LF_W7_LETTER_C6 = [
+    {"position": 0, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 1, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 2, "expected_letter": "ش",  "recited_letter": "ص",  "status": "letter_error"},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 5, "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
+    {"position": 6, "expected_letter": "س",  "recited_letter": "س",  "status": "correct"},
+    {"position": 7, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# ── word 8 · وَالْقَمَرُ ──────────────────────────────────────────────────────
 # letters: ["و","َ","ا","ل","ْ","ق","َ","م","َ","ر","ُ"]
+
+# Case 3  – diacritic_error: damma on رُ (pos 10) dropped → "وَالْقَمَر"
+_LF_W8_DIAC = [
+    {"position": 0,  "expected_letter": "و", "recited_letter": "و", "status": "correct"},
+    {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 3,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 4,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 5,  "expected_letter": "ق", "recited_letter": "ق", "status": "correct"},
+    {"position": 6,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 7,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
+    {"position": 8,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 9,  "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
+    {"position": 10, "expected_letter": "ُ", "recited_letter": "",  "status": "diacritic_error"},
+]
+
+# Case 5  – letter_error: ق (pos 5) → غ → "وَالْغَمَرُ"
 _LF_W8_LETTER = [
     {"position": 0,  "expected_letter": "و", "recited_letter": "و", "status": "correct"},
     {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
@@ -331,8 +488,43 @@ _LF_W8_LETTER = [
     {"position": 10, "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
 ]
 
-# Word 10 · وَالنَّجْمُ  → "وَالنَّجْمِ"  (damma ُ on mīm → kasra ِ)
+# Case 9  – letter_error: ق (pos 5) → ك → "وَالْكَمَرُ"
+_LF_W8_LETTER_C9 = [
+    {"position": 0,  "expected_letter": "و", "recited_letter": "و", "status": "correct"},
+    {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 3,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 4,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 5,  "expected_letter": "ق", "recited_letter": "ك", "status": "letter_error"},
+    {"position": 6,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 7,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
+    {"position": 8,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 9,  "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
+    {"position": 10, "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+]
+
+# ── word 9 · بِحُسْبَانٍ ──────────────────────────────────────────────────────
+# letters: ["ب","ِ","ح","ُ","س","ْ","ب","َ","ا","ن","ٍ"]
+
+# Cases 7, 8  – diacritic_error: tanwīn kasra ٍ (pos 10) dropped → "بِحُسْبَانَ"
+_LF_W9_DIAC = [
+    {"position": 0,  "expected_letter": "ب", "recited_letter": "ب", "status": "correct"},
+    {"position": 1,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+    {"position": 2,  "expected_letter": "ح", "recited_letter": "ح", "status": "correct"},
+    {"position": 3,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+    {"position": 4,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
+    {"position": 5,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 6,  "expected_letter": "ب", "recited_letter": "ب", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "ٍ", "recited_letter": "",  "status": "diacritic_error"},
+]
+
+# ── word 10 · وَالنَّجْمُ ─────────────────────────────────────────────────────
 # letters: ["و","َ","ا","ل","ن","َّ","ج","ْ","م","ُ"]
+
+# Cases 2, 5  – vowel_error: damma on مُ (pos 9) → kasra → "وَالنَّجْمِ"
 _LF_W10_VOWEL = [
     {"position": 0, "expected_letter": "و",  "recited_letter": "و",  "status": "correct"},
     {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
@@ -346,8 +538,130 @@ _LF_W10_VOWEL = [
     {"position": 9, "expected_letter": "ُ",  "recited_letter": "ِ",  "status": "vowel_error"},
 ]
 
-# Word 15 · وَوَضَعَ  → "وَوَضِعَ"  (fatha َ on dad → kasra ِ)
+# Case 9  – diacritic_error: shadda on نَّ (pos 5) dropped → "وَالنَجْمُ"
+_LF_W10_DIAC = [
+    {"position": 0, "expected_letter": "و",  "recited_letter": "و",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 3, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 4, "expected_letter": "ن",  "recited_letter": "ن",  "status": "correct"},
+    {"position": 5, "expected_letter": "َّ", "recited_letter": "َ",  "status": "diacritic_error"},
+    {"position": 6, "expected_letter": "ج",  "recited_letter": "ج",  "status": "correct"},
+    {"position": 7, "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
+    {"position": 8, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 9, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# ── word 11 · وَالشَّجَرُ ─────────────────────────────────────────────────────
+# letters: ["و","َ","ا","ل","ش","َّ","ج","َ","ر","ُ"]
+
+# Cases 6  – diacritic_error: shadda on شَّ (pos 5) dropped → "وَالشَجَرُ"
+_LF_W11_DIAC = [
+    {"position": 0, "expected_letter": "و",  "recited_letter": "و",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 3, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 4, "expected_letter": "ش",  "recited_letter": "ش",  "status": "correct"},
+    {"position": 5, "expected_letter": "َّ", "recited_letter": "َ",  "status": "diacritic_error"},
+    {"position": 6, "expected_letter": "ج",  "recited_letter": "ج",  "status": "correct"},
+    {"position": 7, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 8, "expected_letter": "ر",  "recited_letter": "ر",  "status": "correct"},
+    {"position": 9, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# Case 8  – vowel_error: damma on رُ (pos 9) → fatha → "وَالشَّجَرَ"
+_LF_W11_VOWEL = [
+    {"position": 0, "expected_letter": "و",  "recited_letter": "و",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 3, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 4, "expected_letter": "ش",  "recited_letter": "ش",  "status": "correct"},
+    {"position": 5, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 6, "expected_letter": "ج",  "recited_letter": "ج",  "status": "correct"},
+    {"position": 7, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 8, "expected_letter": "ر",  "recited_letter": "ر",  "status": "correct"},
+    {"position": 9, "expected_letter": "ُ",  "recited_letter": "َ",  "status": "vowel_error"},
+]
+
+# ── word 12 · يَسْجُدَانِ ─────────────────────────────────────────────────────
+# letters: ["ي","َ","س","ْ","ج","ُ","د","َ","ا","ن","ِ"]
+
+# Case 4  – diacritic_error: kasra on نِ (pos 10) → fatha
+_LF_W12_DIAC = [
+    {"position": 0,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
+    {"position": 3,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 4,  "expected_letter": "ج", "recited_letter": "ج", "status": "correct"},
+    {"position": 5,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+    {"position": 6,  "expected_letter": "د", "recited_letter": "د", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "ِ", "recited_letter": "َ", "status": "vowel_error"},
+]
+
+# Case 7  – diacritic_error: sukūn on سْ (pos 3) dropped → "يَسَجُدَانِ"
+_LF_W12_DIAC_C7 = [
+    {"position": 0,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
+    {"position": 3,  "expected_letter": "ْ", "recited_letter": "",  "status": "diacritic_error"},
+    {"position": 4,  "expected_letter": "ج", "recited_letter": "ج", "status": "correct"},
+    {"position": 5,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+    {"position": 6,  "expected_letter": "د", "recited_letter": "د", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+]
+
+# ── word 14 · رَفَعَهَا ───────────────────────────────────────────────────────
+# letters: ["ر","َ","ف","َ","ع","َ","ه","َ","ا"]
+
+# Case 4  – vowel_error: fatha→damma on رَ (pos 1) + fatha→kasra on فَ (pos 3)
+_LF_W14_VOWEL = [
+    {"position": 0, "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "ُ", "status": "vowel_error"},
+    {"position": 2, "expected_letter": "ف", "recited_letter": "ف", "status": "correct"},
+    {"position": 3, "expected_letter": "َ", "recited_letter": "ِ", "status": "vowel_error"},
+    {"position": 4, "expected_letter": "ع", "recited_letter": "ع", "status": "correct"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 6, "expected_letter": "ه", "recited_letter": "ه", "status": "correct"},
+    {"position": 7, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+]
+
+# Case 3  – letter_error: ف (pos 2) → ق → "رَقَعَهَا"
+_LF_W14_LETTER = [
+    {"position": 0, "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2, "expected_letter": "ف", "recited_letter": "ق", "status": "letter_error"},
+    {"position": 3, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 4, "expected_letter": "ع", "recited_letter": "ع", "status": "correct"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 6, "expected_letter": "ه", "recited_letter": "ه", "status": "correct"},
+    {"position": 7, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+]
+
+# Case 8  – letter_error: ع (pos 4) → غ → "رَفَغَهَا"
+_LF_W14_LETTER_C8 = [
+    {"position": 0, "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2, "expected_letter": "ف", "recited_letter": "ف", "status": "correct"},
+    {"position": 3, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 4, "expected_letter": "ع", "recited_letter": "غ", "status": "letter_error"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 6, "expected_letter": "ه", "recited_letter": "ه", "status": "correct"},
+    {"position": 7, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+]
+
+# ── word 15 · وَوَضَعَ ────────────────────────────────────────────────────────
 # letters: ["و","َ","و","َ","ض","َ","ع","َ"]
+
+# Cases 5, 6, 9  – vowel_error: fatha on ضَ (pos 5) → kasra → "وَوَضِعَ"
 _LF_W15_VOWEL = [
     {"position": 0, "expected_letter": "و", "recited_letter": "و", "status": "correct"},
     {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
@@ -359,54 +673,143 @@ _LF_W15_VOWEL = [
     {"position": 7, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
 ]
 
+# ── word 16 · الْمِيزَانَ ─────────────────────────────────────────────────────
+# letters: ["ا","ل","ْ","م","ِ","ي","ز","َ","ا","ن","َ"]
+
+# Cases 4, 9  – vowel_error: kasra on مِ (pos 4) → fatha → "الْمَيزَانَ"
+_LF_W16_VOWEL = [
+    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
+    {"position": 4,  "expected_letter": "ِ", "recited_letter": "َ", "status": "vowel_error"},
+    {"position": 5,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 6,  "expected_letter": "ز", "recited_letter": "ز", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# Case 7  – vowel_error: kasra on مِ (pos 4) → damma → "الْمُيزَانَ"
+_LF_W16_VOWEL_C7 = [
+    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
+    {"position": 4,  "expected_letter": "ِ", "recited_letter": "ُ", "status": "vowel_error"},
+    {"position": 5,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 6,  "expected_letter": "ز", "recited_letter": "ز", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# ── word 17 · أَلَّا ──────────────────────────────────────────────────────────
+# letters: ["أ","َ","ل","َّ","ا"]
+
+# Cases 6  – vowel_error: fatha on أَ (pos 1) → kasra → "إِلَّا"
+_LF_W17_VOWEL = [
+    {"position": 0, "expected_letter": "أ",  "recited_letter": "أ",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "ِ",  "status": "vowel_error"},
+    {"position": 2, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+]
+
+# Case 9  – letter_error: ل (pos 2) → ن → "أَنَّا"
+_LF_W17_LETTER = [
+    {"position": 0, "expected_letter": "أ",  "recited_letter": "أ",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ل",  "recited_letter": "ن",  "status": "letter_error"},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+]
+
+# ── word 20 · الْمِيزَانِ ─────────────────────────────────────────────────────
+# letters: ["ا","ل","ْ","م","ِ","ي","ز","َ","ا","ن","ِ"]
+
+# Case 9  – diacritic_error: kasra on نِ (pos 10) dropped → "الْمِيزَانُ"
+_LF_W20_DIAC = [
+    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
+    {"position": 4,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+    {"position": 5,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 6,  "expected_letter": "ز", "recited_letter": "ز", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "ِ", "recited_letter": "",  "status": "diacritic_error"},
+]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Shared mistake objects  (Cases 1 & 2 & 3)
+# Case 1 – Mixed: vowel error + letter error + diacritic error + incorrect word
+#
+# Mistakes:
+#   Word  3  (خَلَقَ)      – vowel_error:      fatha on خ → kasra   → "خِلَقَ"
+#   Word  7  (الشَّمْسُ)   – letter_error:     س (pos 6) → ص       → "الشَّمْصُ"
+#   Word  9  (بِحُسْبَانٍ) – diacritic_error:  tanwīn kasra missing  → "بِحُسْبَانَ"
+#   Word 18  (تَطْغَوْا)   – incorrect:        dropped ending        → "تطغو"
 # ─────────────────────────────────────────────────────────────────────────────
-
-_M_DIAC = {
-    "word_id": "55:5:3", "word_text": "بِحُسْبَانٍ",
-    "type": "diacritic_error", "recited_text": "بحسبان",
-    "details": "Tanwīn kasra (ٍ) missing at end of word",
-}
-_M_INCR = {
-    "word_id": "55:8:2", "word_text": "تَطْغَوْا",
-    "type": "incorrect", "recited_text": "تطغو",
-    "details": "Ending 'وا' dropped from word",
-}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Case 1 – Smooth recitation with two mistakes
-# ─────────────────────────────────────────────────────────────────────────────
-
-_C1_OVR = {
-    9:  ("diacritic_error", "بحسبان"),   # بِحُسْبَانٍ – tanwin dropped
-    18: ("incorrect",       "تطغو"),     # تَطْغَوْا – waw-alif dropped
-}
 
 _C1_STATUS = {
-    "type": "status",
-    "verse_id": "55:1-8",
+    "type": "status", "verse_id": "55:1-8",
     "message": "Session started. Ready to receive audio.",
-    "total_words": 21,
-    "total_ayahs": 8,
+    "total_words": 21, "total_ayahs": 8,
 }
+
+_C1_ERR = {3: "خِلَقَ", 7: "الشَّمْصُ", 9: "بِحُسْبَانَ", 18: "تطغو"}
+
+_C1_OVR = {
+    3:  ("vowel_error",     _C1_ERR[3],  _LF_W3_VOWEL),
+    7:  ("letter_error",    _C1_ERR[7],  _LF_W7_LETTER),
+    9:  ("diacritic_error", _C1_ERR[9],  _LF_W9_DIAC),
+    18: ("incorrect",       _C1_ERR[18], None),
+}
+
+_M1_VOWEL = {
+    "word_id": "55:3:1", "word_text": "خَلَقَ", "word_position": 3,
+    "type": "vowel_error", "recited_text": _C1_ERR[3],
+    "details": "Fatha (َ) on khā recited as kasra (ِ) — خَلَقَ became خِلَقَ",
+    "letter_feedback": _LF_W3_VOWEL,
+}
+_M1_LETTER = {
+    "word_id": "55:5:1", "word_text": "الشَّمْسُ", "word_position": 7,
+    "type": "letter_error", "recited_text": _C1_ERR[7],
+    "details": "سِين (س) recited as صَاد (ص) — emphatic substitution at word end",
+    "letter_feedback": _LF_W7_LETTER,
+}
+_M1_DIAC = {
+    "word_id": "55:5:3", "word_text": "بِحُسْبَانٍ", "word_position": 9,
+    "type": "diacritic_error", "recited_text": _C1_ERR[9],
+    "details": "Tanwīn kasra (ٍ) missing at end — nunation dropped",
+    "letter_feedback": _LF_W9_DIAC,
+}
+_M1_INCR = {
+    "word_id": "55:8:2", "word_text": "تَطْغَوْا", "word_position": 18,
+    "type": "incorrect", "recited_text": _C1_ERR[18],
+    "details": "Ending 'وا' dropped — تَطْغَوْا recited as تطغو",
+}
+
+_C1_ALL = [_M1_VOWEL, _M1_LETTER, _M1_DIAC, _M1_INCR]
+
+
+def _c1_tx(cursor: int) -> str:
+    return " ".join(_C1_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
 
 
 def _c1(ci, cursor, ayah, pos, complete, mistakes):
     return {
-        "type": "feedback",
-        "chunk_index": ci,
-        "transcribed_text": _txt(range(cursor + 1)),
-        "current_ayah": ayah,
-        "word_cursor": cursor,
-        "position_in_verse": pos,
-        "ayah_complete": complete,
-        "skipped_ayahs": [],
-        "repeated_ayahs": [],
-        "word_feedback": _wf(cursor, _C1_OVR),
-        "mistakes": mistakes,
+        "type": "feedback", "chunk_index": ci,
+        "transcribed_text": _c1_tx(cursor),
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C1_OVR), "mistakes": mistakes,
     }
 
 
@@ -414,84 +817,82 @@ _C1_CHUNKS = [
     _c1(1,  0,  1, 0.05, True,  []),
     _c1(2,  1,  2, 0.10, False, []),
     _c1(3,  2,  2, 0.14, True,  []),
-    _c1(4,  3,  3, 0.19, False, []),
-    _c1(5,  4,  3, 0.24, True,  []),
-    _c1(6,  5,  4, 0.29, False, []),
-    _c1(7,  6,  4, 0.33, True,  []),
-    _c1(8,  7,  5, 0.38, False, []),
-    _c1(9,  8,  5, 0.43, False, []),
-    _c1(10, 9,  5, 0.48, True,  [_M_DIAC]),
-    _c1(11, 10, 6, 0.52, False, [_M_DIAC]),
-    _c1(12, 11, 6, 0.57, False, [_M_DIAC]),
-    _c1(13, 12, 6, 0.62, True,  [_M_DIAC]),
-    _c1(14, 13, 7, 0.67, False, [_M_DIAC]),
-    _c1(15, 14, 7, 0.71, False, [_M_DIAC]),
-    _c1(16, 15, 7, 0.76, False, [_M_DIAC]),
-    _c1(17, 16, 7, 0.81, True,  [_M_DIAC]),
-    {
-        "type": "feedback", "chunk_index": 18,
-        "transcribed_text": _txt(range(19)), "current_ayah": 8,
-        "word_cursor": 18, "position_in_verse": 0.90, "ayah_complete": False,
-        "skipped_ayahs": [], "repeated_ayahs": [],
-        "word_feedback": _wf(18, _C1_OVR), "mistakes": [_M_DIAC, _M_INCR],
-    },
-    {
-        "type": "feedback", "chunk_index": 19,
-        "transcribed_text": _txt(range(21)), "current_ayah": 8,
-        "word_cursor": 20, "position_in_verse": 1.00, "ayah_complete": True,
-        "skipped_ayahs": [], "repeated_ayahs": [],
-        "word_feedback": _wf(20, _C1_OVR), "mistakes": [_M_DIAC, _M_INCR],
-    },
+    _c1(4,  3,  3, 0.19, False, [_M1_VOWEL]),
+    _c1(5,  4,  3, 0.24, True,  [_M1_VOWEL]),
+    _c1(6,  5,  4, 0.29, False, [_M1_VOWEL]),
+    _c1(7,  6,  4, 0.33, True,  [_M1_VOWEL]),
+    _c1(8,  7,  5, 0.38, False, [_M1_VOWEL, _M1_LETTER]),
+    _c1(9,  8,  5, 0.43, False, [_M1_VOWEL, _M1_LETTER]),
+    _c1(10, 9,  5, 0.48, True,  [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(11, 10, 6, 0.52, False, [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(12, 11, 6, 0.57, False, [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(13, 12, 6, 0.62, True,  [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(14, 13, 7, 0.67, False, [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(15, 14, 7, 0.71, False, [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(16, 15, 7, 0.76, False, [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(17, 16, 7, 0.81, True,  [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(18, 17, 8, 0.86, False, [_M1_VOWEL, _M1_LETTER, _M1_DIAC]),
+    _c1(19, 18, 8, 0.90, False, _C1_ALL),
+    _c1(20, 19, 8, 0.95, False, _C1_ALL),
+    _c1(21, 20, 8, 1.00, True,  _C1_ALL),
 ]
 
+_C1_LM, _C1_WM = _split_mistakes(_C1_ALL)
+
 _C1_SUMMARY = {
-    "type": "session_summary",
-    "verse_id": "55:1-8",
-    "total_chunks": 19,
-    "duration_seconds": 38,
-    "full_transcription": _txt(range(21)),
-    "total_words": 21,
-    "words_correct": 19,
-    "words_diacritic_error": 1,
-    "words_vowel_error": 0,
-    "words_letter_error": 0,
-    "words_incorrect": 1,
-    "words_not_recited": 0,
-    "total_score": 88,
-    "completion_percentage": 100,
-    "skipped_ayahs": [],
-    "repeated_ayahs": [],
-    "skip_detail": [],
-    "repetition_detail": [],
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
+    "full_transcription": _c1_tx(20),
+    "total_words": 21, "words_correct": 17,
+    "words_diacritic_error": 1, "words_vowel_error": 1,
+    "words_letter_error": 1, "words_incorrect": 1, "words_not_recited": 0,
+    "total_score": 72, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
     "ayah_scores": [
         {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
         {"ayah": 2, "score": 100, "words_correct": 2, "words_errors": 0},
-        {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 3, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "خَلَقَ — fatha on khā recited as kasra"},
         {"ayah": 4, "score": 100, "words_correct": 2, "words_errors": 0},
-        {"ayah": 5, "score": 80,  "words_correct": 2, "words_errors": 1},
+        {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "الشَّمْصُ — sīn substituted with ṣād; بِحُسْبَانٍ tanwīn dropped"},
         {"ayah": 6, "score": 100, "words_correct": 3, "words_errors": 0},
         {"ayah": 7, "score": 100, "words_correct": 4, "words_errors": 0},
-        {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1},
+        {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "تَطْغَوْا — ending 'وا' dropped"},
     ],
-    "mistakes": [_M_DIAC, _M_INCR],
+    "letter_mistakes": _C1_LM,
+    "word_mistakes":   _C1_WM,
+    "mistakes":        _C1_ALL,
     "overall_feedback": (
-        "Excellent recitation! 2 mistakes to review: a missing tanwīn on "
-        "بِحُسْبَانٍ and an incorrect reading of تَطْغَوْا. All 8 ayahs completed."
+        "4 mistakes found: vowel error on خَلَقَ (fatha→kasra); "
+        "سِين→صَاد substitution in الشَّمْصُ; tanwīn missing from بِحُسْبَانٍ; "
+        "and تَطْغَوْا recited incorrectly. Review these words carefully."
     ),
-    "recording": _recording(1, 38),
+    "recording": _recording(1, 40),
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Case 2 – User repeats Ayah 1 then recites perfectly
+# Case 2 – Repeat Ayah 1 + diacritic error + vowel error
+#
+# Mistakes (beyond repetition):
+#   Word  6  (الْبَيَانَ) – diacritic_error: sukūn on لْ dropped → "الَبَيَانَ"
+#   Word 10  (وَالنَّجْمُ) – vowel_error:    damma on م → kasra   → "وَالنَّجْمِ"
 # ─────────────────────────────────────────────────────────────────────────────
 
 _C2_STATUS = {
-    "type": "status",
-    "verse_id": "55:1-8",
+    "type": "status", "verse_id": "55:1-8",
     "message": "Session started. Ready to receive audio.",
-    "total_words": 21,
-    "total_ayahs": 8,
+    "total_words": 21, "total_ayahs": 8,
+}
+
+_C2_ERR = {6: "الَبَيَانَ", 10: "وَالنَّجْمِ"}
+
+_C2_OVR = {
+    6:  ("diacritic_error", _C2_ERR[6],  _LF_W6_DIAC),
+    10: ("vowel_error",     _C2_ERR[10], _LF_W10_VOWEL),
 }
 
 _C2_REP_DETAIL = [{
@@ -502,30 +903,43 @@ _C2_REP_DETAIL = [{
     "note": "Ayah 1 recited again from the beginning",
 }]
 
+_M2_DIAC = {
+    "word_id": "55:4:2", "word_text": "الْبَيَانَ", "word_position": 6,
+    "type": "diacritic_error", "recited_text": _C2_ERR[6],
+    "details": "Sukūn (ْ) missing from lam — الْبَيَانَ recited as الَبَيَانَ",
+    "letter_feedback": _LF_W6_DIAC,
+}
+_M2_VOWEL = {
+    "word_id": "55:6:1", "word_text": "وَالنَّجْمُ", "word_position": 10,
+    "type": "vowel_error", "recited_text": _C2_ERR[10],
+    "details": "Damma (ُ) on mīm recited as kasra (ِ) — short vowel confusion",
+    "letter_feedback": _LF_W10_VOWEL,
+}
+
+_C2_ALL = [_M2_DIAC, _M2_VOWEL]
+
 _C2_W0 = WORDS[0]["text"]
-_C2_PREFIX = _C2_W0 + " " + _C2_W0   # "الرَّحْمَٰنُ الرَّحْمَٰنُ"
+_C2_PREFIX = _C2_W0 + " " + _C2_W0
 
 
-def _c2_tx(cursor):
+def _c2_tx(cursor: int) -> str:
     if cursor == 0:
         return _C2_PREFIX
-    return _C2_PREFIX + " " + _txt(range(1, cursor + 1))
+    return _C2_PREFIX + " " + " ".join(
+        _C2_ERR.get(i, WORDS[i]["text"]) for i in range(1, cursor + 1)
+    )
 
 
-def _c2_prog(ci, cursor, ayah, pos, complete):
+def _c2_prog(ci, cursor, ayah, pos, complete, mistakes):
     return {
-        "type": "feedback",
-        "chunk_index": ci,
+        "type": "feedback", "chunk_index": ci,
         "transcribed_text": _c2_tx(cursor),
-        "current_ayah": ayah,
-        "word_cursor": cursor,
-        "position_in_verse": pos,
-        "ayah_complete": complete,
-        "skipped_ayahs": [],
-        "repeated_ayahs": [1],
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [1],
         "repetition_detail": _C2_REP_DETAIL,
-        "word_feedback": _wf(cursor),
-        "mistakes": [],
+        "word_feedback": _wf(cursor, _C2_OVR),
+        "mistakes": mistakes,
     }
 
 
@@ -545,75 +959,76 @@ _C2_CHUNKS = [
         "repetition_detail": _C2_REP_DETAIL,
         "word_feedback": _wf(0), "mistakes": [],
     },
-    _c2_prog(3,  1,  2, 0.10, False),
-    _c2_prog(4,  2,  2, 0.14, True),
-    _c2_prog(5,  3,  3, 0.19, False),
-    _c2_prog(6,  4,  3, 0.24, True),
-    _c2_prog(7,  5,  4, 0.29, False),
-    _c2_prog(8,  6,  4, 0.33, True),
-    _c2_prog(9,  7,  5, 0.38, False),
-    _c2_prog(10, 8,  5, 0.43, False),
-    _c2_prog(11, 9,  5, 0.48, True),
-    _c2_prog(12, 10, 6, 0.52, False),
-    _c2_prog(13, 11, 6, 0.57, False),
-    _c2_prog(14, 12, 6, 0.62, True),
-    _c2_prog(15, 13, 7, 0.67, False),
-    _c2_prog(16, 14, 7, 0.71, False),
-    _c2_prog(17, 15, 7, 0.76, False),
-    _c2_prog(18, 16, 7, 0.81, True),
-    _c2_prog(19, 17, 8, 0.86, False),
-    _c2_prog(20, 18, 8, 0.90, False),
-    _c2_prog(21, 20, 8, 1.00, True),
+    _c2_prog(3,  1,  2, 0.10, False, []),
+    _c2_prog(4,  2,  2, 0.14, True,  []),
+    _c2_prog(5,  3,  3, 0.19, False, []),
+    _c2_prog(6,  4,  3, 0.24, True,  []),
+    _c2_prog(7,  5,  4, 0.29, False, []),
+    _c2_prog(8,  6,  4, 0.33, True,  [_M2_DIAC]),
+    _c2_prog(9,  7,  5, 0.38, False, [_M2_DIAC]),
+    _c2_prog(10, 8,  5, 0.43, False, [_M2_DIAC]),
+    _c2_prog(11, 9,  5, 0.48, True,  [_M2_DIAC]),
+    _c2_prog(12, 10, 6, 0.52, False, _C2_ALL),
+    _c2_prog(13, 11, 6, 0.57, False, _C2_ALL),
+    _c2_prog(14, 12, 6, 0.62, True,  _C2_ALL),
+    _c2_prog(15, 13, 7, 0.67, False, _C2_ALL),
+    _c2_prog(16, 14, 7, 0.71, False, _C2_ALL),
+    _c2_prog(17, 15, 7, 0.76, False, _C2_ALL),
+    _c2_prog(18, 16, 7, 0.81, True,  _C2_ALL),
+    _c2_prog(19, 17, 8, 0.86, False, _C2_ALL),
+    _c2_prog(20, 18, 8, 0.90, False, _C2_ALL),
+    _c2_prog(21, 20, 8, 1.00, True,  _C2_ALL),
 ]
 
+_C2_LM, _C2_WM = _split_mistakes(_C2_ALL)
+
 _C2_SUMMARY = {
-    "type": "session_summary",
-    "verse_id": "55:1-8",
-    "total_chunks": 21,
-    "duration_seconds": 42,
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 42,
     "full_transcription": _c2_tx(20),
-    "total_words": 21,
-    "words_correct": 21,
-    "words_diacritic_error": 0,
-    "words_vowel_error": 0,
-    "words_letter_error": 0,
-    "words_incorrect": 0,
-    "words_not_recited": 0,
-    "total_score": 95,
-    "completion_percentage": 100,
-    "skipped_ayahs": [],
-    "repeated_ayahs": [1],
-    "skip_detail": [],
-    "repetition_detail": _C2_REP_DETAIL,
+    "total_words": 21, "words_correct": 19,
+    "words_diacritic_error": 1, "words_vowel_error": 1,
+    "words_letter_error": 0, "words_incorrect": 0, "words_not_recited": 0,
+    "total_score": 85, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [1],
+    "skip_detail": [], "repetition_detail": _C2_REP_DETAIL,
     "ayah_scores": [
-        {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0, "note": "Repeated once"},
+        {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0,
+         "note": "Ayah 1 repeated once"},
         {"ayah": 2, "score": 100, "words_correct": 2, "words_errors": 0},
         {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
-        {"ayah": 4, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 4, "score": 80,  "words_correct": 1, "words_errors": 1,
+         "note": "الْبَيَانَ — sukūn on lam dropped"},
         {"ayah": 5, "score": 100, "words_correct": 3, "words_errors": 0},
-        {"ayah": 6, "score": 100, "words_correct": 3, "words_errors": 0},
+        {"ayah": 6, "score": 80,  "words_correct": 2, "words_errors": 1,
+         "note": "وَالنَّجْمُ — damma on mīm recited as kasra"},
         {"ayah": 7, "score": 100, "words_correct": 4, "words_errors": 0},
         {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
     ],
-    "mistakes": [],
+    "letter_mistakes": _C2_LM,
+    "word_mistakes":   _C2_WM,
+    "mistakes":        _C2_ALL,
     "overall_feedback": (
-        "Perfect recitation! All words and harakat correct. "
-        "Note: Ayah 1 was repeated once — this may indicate uncertainty at the start."
+        "Good recitation! Ayah 1 was repeated once. "
+        "2 mistakes: sukūn dropped from الْبَيَانَ and damma→kasra on وَالنَّجْمُ. "
+        "Focus on junction diacritics and final vowels."
     ),
     "recording": _recording(2, 42),
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Case 3 – User skips Ayah 2 and jumps to Ayah 3
+# Case 3 – Skip Ayah 2 + diacritic error + letter error
+#
+# Mistakes (beyond skip):
+#   Word  8  (وَالْقَمَرُ) – diacritic_error: damma on رُ dropped → "وَالْقَمَر"
+#   Word 14  (رَفَعَهَا)   – letter_error:    ف (pos 2) → ق      → "رَقَعَهَا"
 # ─────────────────────────────────────────────────────────────────────────────
 
 _C3_STATUS = {
-    "type": "status",
-    "verse_id": "55:1-8",
+    "type": "status", "verse_id": "55:1-8",
     "message": "Session started. Ready to receive audio.",
-    "total_words": 21,
-    "total_ayahs": 8,
+    "total_words": 21, "total_ayahs": 8,
 }
 
 _C3_SKIP_DETAIL = [{
@@ -628,26 +1043,44 @@ _C3_SKIP_DETAIL = [{
 
 _C3_SKIP_POS = {1, 2}
 
+_C3_ERR = {8: "وَالْقَمَر", 14: "رَقَعَهَا"}
 
-def _c3_tx(cursor):
+_C3_OVR = {
+    8:  ("diacritic_error", _C3_ERR[8],  _LF_W8_DIAC),
+    14: ("letter_error",    _C3_ERR[14], _LF_W14_LETTER),
+}
+
+_M3_DIAC = {
+    "word_id": "55:5:2", "word_text": "وَالْقَمَرُ", "word_position": 8,
+    "type": "diacritic_error", "recited_text": _C3_ERR[8],
+    "details": "Damma (ُ) missing from rā — وَالْقَمَرُ recited without final vowel",
+    "letter_feedback": _LF_W8_DIAC,
+}
+_M3_LETTER = {
+    "word_id": "55:7:2", "word_text": "رَفَعَهَا", "word_position": 14,
+    "type": "letter_error", "recited_text": _C3_ERR[14],
+    "details": "فَاء (ف) recited as قَاف (ق) — labial/uvular confusion",
+    "letter_feedback": _LF_W14_LETTER,
+}
+
+_C3_ALL = [_M3_DIAC, _M3_LETTER]
+
+
+def _c3_tx(cursor: int) -> str:
     indices = [i for i in range(cursor + 1) if i not in _C3_SKIP_POS]
-    return _txt(indices)
+    return " ".join(_C3_ERR.get(i, WORDS[i]["text"]) for i in indices)
 
 
-def _c3_prog(ci, cursor, ayah, pos, complete):
+def _c3_prog(ci, cursor, ayah, pos, complete, mistakes):
     return {
-        "type": "feedback",
-        "chunk_index": ci,
+        "type": "feedback", "chunk_index": ci,
         "transcribed_text": _c3_tx(cursor),
-        "current_ayah": ayah,
-        "word_cursor": cursor,
-        "position_in_verse": pos,
-        "ayah_complete": complete,
-        "skipped_ayahs": [2],
-        "skip_detail": _C3_SKIP_DETAIL,
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [2], "skip_detail": _C3_SKIP_DETAIL,
         "repeated_ayahs": [],
-        "word_feedback": _wf(cursor, skipped=_C3_SKIP_POS),
-        "mistakes": [],
+        "word_feedback": _wf(cursor, _C3_OVR, skipped=_C3_SKIP_POS),
+        "mistakes": mistakes,
     }
 
 
@@ -664,509 +1097,464 @@ _C3_CHUNKS = [
         "transcribed_text": _txt([0, 3]), "current_ayah": 3,
         "word_cursor": 3, "position_in_verse": 0.19, "ayah_complete": False,
         "skipped_ayahs": [2], "skip_detail": _C3_SKIP_DETAIL, "repeated_ayahs": [],
-        "word_feedback": _wf(3, skipped=_C3_SKIP_POS), "mistakes": [],
+        "word_feedback": _wf(3, _C3_OVR, skipped=_C3_SKIP_POS), "mistakes": [],
     },
     {
         "type": "feedback", "chunk_index": 3,
         "transcribed_text": _txt([0, 3, 4]), "current_ayah": 3,
         "word_cursor": 4, "position_in_verse": 0.24, "ayah_complete": True,
         "skipped_ayahs": [2], "skip_detail": _C3_SKIP_DETAIL, "repeated_ayahs": [],
-        "word_feedback": _wf(4, skipped=_C3_SKIP_POS), "mistakes": [],
+        "word_feedback": _wf(4, _C3_OVR, skipped=_C3_SKIP_POS), "mistakes": [],
     },
-    _c3_prog(4,  5,  4, 0.29, False),
-    _c3_prog(5,  6,  4, 0.33, True),
-    _c3_prog(6,  7,  5, 0.38, False),
-    _c3_prog(7,  8,  5, 0.43, False),
-    _c3_prog(8,  9,  5, 0.48, True),
-    _c3_prog(9,  10, 6, 0.52, False),
-    _c3_prog(10, 11, 6, 0.57, False),
-    _c3_prog(11, 12, 6, 0.62, True),
-    _c3_prog(12, 13, 7, 0.67, False),
-    _c3_prog(13, 14, 7, 0.71, False),
-    _c3_prog(14, 15, 7, 0.76, False),
-    _c3_prog(15, 16, 7, 0.81, True),
-    _c3_prog(16, 17, 8, 0.86, False),
-    _c3_prog(17, 18, 8, 0.90, False),
-    _c3_prog(18, 19, 8, 0.95, False),
-    _c3_prog(19, 20, 8, 1.00, True),
+    _c3_prog(4,  5,  4, 0.29, False, []),
+    _c3_prog(5,  6,  4, 0.33, True,  []),
+    _c3_prog(6,  7,  5, 0.38, False, []),
+    _c3_prog(7,  8,  5, 0.43, False, [_M3_DIAC]),
+    _c3_prog(8,  9,  5, 0.48, True,  [_M3_DIAC]),
+    _c3_prog(9,  10, 6, 0.52, False, [_M3_DIAC]),
+    _c3_prog(10, 11, 6, 0.57, False, [_M3_DIAC]),
+    _c3_prog(11, 12, 6, 0.62, True,  [_M3_DIAC]),
+    _c3_prog(12, 13, 7, 0.67, False, [_M3_DIAC]),
+    _c3_prog(13, 14, 7, 0.71, False, _C3_ALL),
+    _c3_prog(14, 15, 7, 0.76, False, _C3_ALL),
+    _c3_prog(15, 16, 7, 0.81, True,  _C3_ALL),
+    _c3_prog(16, 17, 8, 0.86, False, _C3_ALL),
+    _c3_prog(17, 18, 8, 0.90, False, _C3_ALL),
+    _c3_prog(18, 19, 8, 0.95, False, _C3_ALL),
+    _c3_prog(19, 20, 8, 1.00, True,  _C3_ALL),
 ]
 
+_C3_LM, _C3_WM = _split_mistakes(_C3_ALL)
+
 _C3_SUMMARY = {
-    "type": "session_summary",
-    "verse_id": "55:1-8",
-    "total_chunks": 19,
-    "duration_seconds": 38,
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 19, "duration_seconds": 38,
     "full_transcription": _c3_tx(20),
-    "total_words": 21,
-    "words_correct": 19,
-    "words_diacritic_error": 0,
-    "words_vowel_error": 0,
-    "words_letter_error": 0,
-    "words_incorrect": 0,
-    "words_not_recited": 2,
-    "total_score": 72,
-    "completion_percentage": 90,
-    "skipped_ayahs": [2],
-    "repeated_ayahs": [],
-    "skip_detail": _C3_SKIP_DETAIL,
-    "repetition_detail": [],
+    "total_words": 21, "words_correct": 17,
+    "words_diacritic_error": 1, "words_vowel_error": 0,
+    "words_letter_error": 1, "words_incorrect": 0, "words_not_recited": 2,
+    "total_score": 65, "completion_percentage": 90,
+    "skipped_ayahs": [2], "repeated_ayahs": [],
+    "skip_detail": _C3_SKIP_DETAIL, "repetition_detail": [],
     "ayah_scores": [
         {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
-        {"ayah": 2, "score": 0,   "words_correct": 0, "words_errors": 0, "note": "Skipped entirely"},
+        {"ayah": 2, "score": 0,   "words_correct": 0, "words_errors": 0,
+         "note": "Skipped entirely"},
         {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
         {"ayah": 4, "score": 100, "words_correct": 2, "words_errors": 0},
-        {"ayah": 5, "score": 100, "words_correct": 3, "words_errors": 0},
+        {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "وَالْقَمَرُ — damma on rā dropped"},
         {"ayah": 6, "score": 100, "words_correct": 3, "words_errors": 0},
-        {"ayah": 7, "score": 100, "words_correct": 4, "words_errors": 0},
+        {"ayah": 7, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "رَفَعَهَا — fā recited as qāf"},
         {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
     ],
-    "mistakes": [],
+    "letter_mistakes": _C3_LM,
+    "word_mistakes":   _C3_WM,
+    "mistakes":        _C3_ALL,
     "overall_feedback": (
-        "Good recitation with one issue: Ayah 2 (عَلَّمَ الْقُرْآنَ) was skipped. "
-        "All other ayahs were recited correctly. "
-        "Review and memorise ayah 2 before the next session."
+        "Ayah 2 (عَلَّمَ الْقُرْآنَ) was skipped. "
+        "2 additional mistakes: damma dropped from وَالْقَمَرُ and "
+        "فَاء substituted with قَاف in رَفَعَهَا. "
+        "Memorise ayah 2 and review these letter/diacritic errors."
     ),
     "recording": _recording(3, 38),
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Case 4 – Heavy harakat mistakes (3 diacritic + 2 vowel errors)
-#
-# Scenario: User completes all 8 ayahs but repeatedly struggles with harakat.
+# Case 4 – Heavy harakat + letter error + incorrect word  (7 mistakes)
 #
 # Mistakes:
-#   Word  1  (عَلَّمَ)     – diacritic_error: shadda on lam dropped → "عَلَمَ"
-#   Word  5  (عَلَّمَهُ)   – diacritic_error: damma on hā dropped   → "عَلَّمَه"
-#   Word 12  (يَسْجُدَانِ) – diacritic_error: kasra on nūn → fatha  → "يَسْجُدَانَ"
-#   Word 14  (رَفَعَهَا)   – vowel_error:    fatha→damma, fatha→kasra → "رُفِعَهَا"
-#   Word 16  (الْمِيزَانَ) – vowel_error:    kasra on mīm → fatha   → "الْمَيزَانَ"
+#   Word  0  (الرَّحْمَٰنُ) – letter_error:     ح (pos 4) → خ         → "الرَّخْمَٰنُ"
+#   Word  1  (عَلَّمَ)      – diacritic_error:  shadda on ل missing    → "عَلَمَ"
+#   Word  5  (عَلَّمَهُ)    – diacritic_error:  damma on ه missing     → "عَلَّمَه"
+#   Word 12  (يَسْجُدَانِ)  – diacritic_error:  kasra on ن → fatha     → "يَسْجُدَانَ"
+#   Word 14  (رَفَعَهَا)    – vowel_error:       fatha→damma + fatha→kasra → "رُفِعَهَا"
+#   Word 16  (الْمِيزَانَ)  – vowel_error:       kasra on م → fatha    → "الْمَيزَانَ"
+#   Word 18  (تَطْغَوْا)    – incorrect:         ending dropped        → "تطغو"
 # ─────────────────────────────────────────────────────────────────────────────
 
 _C4_STATUS = {
-    "type": "status",
-    "verse_id": "55:1-8",
+    "type": "status", "verse_id": "55:1-8",
     "message": "Session started. Ready to receive audio.",
-    "total_words": 21,
-    "total_ayahs": 8,
+    "total_words": 21, "total_ayahs": 8,
 }
 
-# Recited forms for error words in Case 4
 _C4_ERR = {
+    0:  "الرَّخْمَٰنُ",
     1:  "عَلَمَ",
     5:  "عَلَّمَه",
     12: "يَسْجُدَانَ",
     14: "رُفِعَهَا",
     16: "الْمَيزَانَ",
+    18: "تطغو",
 }
 
-# Overrides: (status, recited_text, letter_feedback)
 _C4_OVR = {
+    0:  ("letter_error",    _C4_ERR[0],  _LF_W0_LETTER),
     1:  ("diacritic_error", _C4_ERR[1],  _LF_W1_DIAC),
     5:  ("diacritic_error", _C4_ERR[5],  _LF_W5_DIAC),
     12: ("diacritic_error", _C4_ERR[12], _LF_W12_DIAC),
     14: ("vowel_error",     _C4_ERR[14], _LF_W14_VOWEL),
     16: ("vowel_error",     _C4_ERR[16], _LF_W16_VOWEL),
+    18: ("incorrect",       _C4_ERR[18], None),
 }
 
-# Mistake objects (carry letter_feedback for rich frontend display)
+_M4_LETTER = {
+    "word_id": "55:1:1", "word_text": "الرَّحْمَٰنُ", "word_position": 0,
+    "type": "letter_error", "recited_text": _C4_ERR[0],
+    "details": "حَاء (ح) recited as خَاء (خ) — pharyngeal/velar confusion",
+    "letter_feedback": _LF_W0_LETTER,
+}
 _M4_DIAC1 = {
-    "word_id": "55:2:1", "word_text": "عَلَّمَ",
+    "word_id": "55:2:1", "word_text": "عَلَّمَ", "word_position": 1,
     "type": "diacritic_error", "recited_text": _C4_ERR[1],
-    "details": "Shadda (ّ) missing on lam — word shortened to عَلَمَ",
+    "details": "Shadda (ّ) missing on lam — عَلَّمَ shortened to عَلَمَ",
     "letter_feedback": _LF_W1_DIAC,
 }
 _M4_DIAC2 = {
-    "word_id": "55:4:1", "word_text": "عَلَّمَهُ",
+    "word_id": "55:4:1", "word_text": "عَلَّمَهُ", "word_position": 5,
     "type": "diacritic_error", "recited_text": _C4_ERR[5],
-    "details": "Damma (ُ) missing on hā — word ends without vowel",
+    "details": "Damma (ُ) missing on hā — word ends without final vowel",
     "letter_feedback": _LF_W5_DIAC,
 }
 _M4_DIAC3 = {
-    "word_id": "55:6:3", "word_text": "يَسْجُدَانِ",
+    "word_id": "55:6:3", "word_text": "يَسْجُدَانِ", "word_position": 12,
     "type": "diacritic_error", "recited_text": _C4_ERR[12],
     "details": "Kasra (ِ) on nūn recited as fatha (َ) — ending changed",
     "letter_feedback": _LF_W12_DIAC,
 }
 _M4_VOWEL1 = {
-    "word_id": "55:7:2", "word_text": "رَفَعَهَا",
+    "word_id": "55:7:2", "word_text": "رَفَعَهَا", "word_position": 14,
     "type": "vowel_error", "recited_text": _C4_ERR[14],
-    "details": "Fatha (َ) on rā recited as damma (ُ); fatha on fā recited as kasra (ِ)",
+    "details": "Fatha (َ) on rā→damma (ُ); fatha on fā→kasra (ِ) — double vowel error",
     "letter_feedback": _LF_W14_VOWEL,
 }
 _M4_VOWEL2 = {
-    "word_id": "55:7:4", "word_text": "الْمِيزَانَ",
+    "word_id": "55:7:4", "word_text": "الْمِيزَانَ", "word_position": 16,
     "type": "vowel_error", "recited_text": _C4_ERR[16],
     "details": "Kasra (ِ) on mīm recited as fatha (َ) — vowel of mīm changed",
     "letter_feedback": _LF_W16_VOWEL,
 }
+_M4_INCR = {
+    "word_id": "55:8:2", "word_text": "تَطْغَوْا", "word_position": 18,
+    "type": "incorrect", "recited_text": _C4_ERR[18],
+    "details": "Ending 'وا' dropped — تَطْغَوْا recited as تطغو",
+}
+
+_C4_ALL = [_M4_LETTER, _M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1, _M4_VOWEL2, _M4_INCR]
 
 
 def _c4_tx(cursor: int) -> str:
-    """Cumulative transcription for Case 4 (uses recited forms for error words)."""
     return " ".join(_C4_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
 
 
 def _c4(ci, cursor, ayah, pos, complete, mistakes):
     return {
-        "type": "feedback",
-        "chunk_index": ci,
+        "type": "feedback", "chunk_index": ci,
         "transcribed_text": _c4_tx(cursor),
-        "current_ayah": ayah,
-        "word_cursor": cursor,
-        "position_in_verse": pos,
-        "ayah_complete": complete,
-        "skipped_ayahs": [],
-        "repeated_ayahs": [],
-        "word_feedback": _wf(cursor, _C4_OVR),
-        "mistakes": mistakes,
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C4_OVR), "mistakes": mistakes,
     }
 
 
 _C4_CHUNKS = [
-    _c4(1,  0,  1, 0.05, True,  []),
-    _c4(2,  1,  2, 0.10, False, [_M4_DIAC1]),           # word 1: diacritic
-    _c4(3,  2,  2, 0.14, True,  [_M4_DIAC1]),
-    _c4(4,  3,  3, 0.19, False, [_M4_DIAC1]),
-    _c4(5,  4,  3, 0.24, True,  [_M4_DIAC1]),
-    _c4(6,  5,  4, 0.29, False, [_M4_DIAC1, _M4_DIAC2]), # word 5: diacritic
-    _c4(7,  6,  4, 0.33, True,  [_M4_DIAC1, _M4_DIAC2]),
-    _c4(8,  7,  5, 0.38, False, [_M4_DIAC1, _M4_DIAC2]),
-    _c4(9,  8,  5, 0.43, False, [_M4_DIAC1, _M4_DIAC2]),
-    _c4(10, 9,  5, 0.48, True,  [_M4_DIAC1, _M4_DIAC2]),
-    _c4(11, 10, 6, 0.52, False, [_M4_DIAC1, _M4_DIAC2]),
-    _c4(12, 11, 6, 0.57, False, [_M4_DIAC1, _M4_DIAC2]),
-    _c4(13, 12, 6, 0.62, True,  [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3]), # word 12
-    _c4(14, 13, 7, 0.67, False, [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3]),
-    _c4(15, 14, 7, 0.71, False, [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1]), # word 14
-    _c4(16, 15, 7, 0.76, False, [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1]),
-    _c4(17, 16, 7, 0.81, True,  [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1, _M4_VOWEL2]), # word 16
-    {
-        "type": "feedback", "chunk_index": 18,
-        "transcribed_text": _c4_tx(18), "current_ayah": 8,
-        "word_cursor": 18, "position_in_verse": 0.90, "ayah_complete": False,
-        "skipped_ayahs": [], "repeated_ayahs": [],
-        "word_feedback": _wf(18, _C4_OVR),
-        "mistakes": [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1, _M4_VOWEL2],
-    },
-    {
-        "type": "feedback", "chunk_index": 19,
-        "transcribed_text": _c4_tx(20), "current_ayah": 8,
-        "word_cursor": 20, "position_in_verse": 1.00, "ayah_complete": True,
-        "skipped_ayahs": [], "repeated_ayahs": [],
-        "word_feedback": _wf(20, _C4_OVR),
-        "mistakes": [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1, _M4_VOWEL2],
-    },
+    _c4(1,  0,  1, 0.05, True,  [_M4_LETTER]),
+    _c4(2,  1,  2, 0.10, False, [_M4_LETTER, _M4_DIAC1]),
+    _c4(3,  2,  2, 0.14, True,  [_M4_LETTER, _M4_DIAC1]),
+    _c4(4,  3,  3, 0.19, False, [_M4_LETTER, _M4_DIAC1]),
+    _c4(5,  4,  3, 0.24, True,  [_M4_LETTER, _M4_DIAC1]),
+    _c4(6,  5,  4, 0.29, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2]),
+    _c4(7,  6,  4, 0.33, True,  [_M4_LETTER, _M4_DIAC1, _M4_DIAC2]),
+    _c4(8,  7,  5, 0.38, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2]),
+    _c4(9,  8,  5, 0.43, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2]),
+    _c4(10, 9,  5, 0.48, True,  [_M4_LETTER, _M4_DIAC1, _M4_DIAC2]),
+    _c4(11, 10, 6, 0.52, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2]),
+    _c4(12, 11, 6, 0.57, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2]),
+    _c4(13, 12, 6, 0.62, True,  [_M4_LETTER, _M4_DIAC1, _M4_DIAC2, _M4_DIAC3]),
+    _c4(14, 13, 7, 0.67, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2, _M4_DIAC3]),
+    _c4(15, 14, 7, 0.71, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1]),
+    _c4(16, 15, 7, 0.76, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1]),
+    _c4(17, 16, 7, 0.81, True,  [_M4_LETTER, _M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1, _M4_VOWEL2]),
+    _c4(18, 17, 8, 0.86, False, [_M4_LETTER, _M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1, _M4_VOWEL2]),
+    _c4(19, 18, 8, 0.90, False, _C4_ALL),
+    _c4(20, 19, 8, 0.95, False, _C4_ALL),
+    _c4(21, 20, 8, 1.00, True,  _C4_ALL),
 ]
 
-_C4_ALL_MISTAKES = [_M4_DIAC1, _M4_DIAC2, _M4_DIAC3, _M4_VOWEL1, _M4_VOWEL2]
+_C4_LM, _C4_WM = _split_mistakes(_C4_ALL)
 
 _C4_SUMMARY = {
-    "type": "session_summary",
-    "verse_id": "55:1-8",
-    "total_chunks": 19,
-    "duration_seconds": 38,
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
     "full_transcription": _c4_tx(20),
-    "total_words": 21,
-    "words_correct": 16,
-    "words_diacritic_error": 3,
-    "words_vowel_error": 2,
-    "words_letter_error": 0,
-    "words_incorrect": 0,
-    "words_not_recited": 0,
-    "total_score": 78,
-    "completion_percentage": 100,
-    "skipped_ayahs": [],
-    "repeated_ayahs": [],
-    "skip_detail": [],
-    "repetition_detail": [],
+    "total_words": 21, "words_correct": 14,
+    "words_diacritic_error": 3, "words_vowel_error": 2,
+    "words_letter_error": 1, "words_incorrect": 1, "words_not_recited": 0,
+    "total_score": 62, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
     "ayah_scores": [
-        {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
-        {"ayah": 2, "score": 70,  "words_correct": 1, "words_errors": 1,
-         "note": "عَلَّمَ recited without shadda"},
+        {"ayah": 1, "score": 50,  "words_correct": 0, "words_errors": 1,
+         "note": "الرَّحْمَٰنُ — ح recited as خ"},
+        {"ayah": 2, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "عَلَّمَ — shadda on lam missing"},
         {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
-        {"ayah": 4, "score": 70,  "words_correct": 1, "words_errors": 1,
-         "note": "عَلَّمَهُ recited without damma on hā"},
+        {"ayah": 4, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "عَلَّمَهُ — damma on hā missing"},
         {"ayah": 5, "score": 100, "words_correct": 3, "words_errors": 0},
-        {"ayah": 6, "score": 80,  "words_correct": 2, "words_errors": 1,
+        {"ayah": 6, "score": 67,  "words_correct": 2, "words_errors": 1,
          "note": "يَسْجُدَانِ — kasra on nūn changed to fatha"},
-        {"ayah": 7, "score": 60,  "words_correct": 2, "words_errors": 2,
+        {"ayah": 7, "score": 50,  "words_correct": 2, "words_errors": 2,
          "note": "رَفَعَهَا and الْمِيزَانَ have wrong vowels"},
-        {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
+        {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "تَطْغَوْا — ending dropped"},
     ],
-    "mistakes": _C4_ALL_MISTAKES,
+    "letter_mistakes": _C4_LM,
+    "word_mistakes":   _C4_WM,
+    "mistakes":        _C4_ALL,
     "overall_feedback": (
-        "Good effort! 5 harakat mistakes found: 3 diacritical errors and 2 vowel "
-        "errors. Focus on the shadda in عَلَّمَ, the damma ending of عَلَّمَهُ, "
-        "the kasra on يَسْجُدَانِ, and the vowels in رَفَعَهَا and الْمِيزَانَ."
+        "7 mistakes: ح→خ in الرَّحْمَٰنُ (letter); "
+        "shadda missing in عَلَّمَ; damma missing in عَلَّمَهُ; "
+        "kasra→fatha in يَسْجُدَانِ (3 diacritic errors); "
+        "double vowel error in رَفَعَهَا; kasra→fatha in الْمِيزَانَ (2 vowel errors); "
+        "and تَطْغَوْا recited incorrectly. Significant harakat work needed."
     ),
-    "recording": _recording(4, 38),
+    "recording": _recording(4, 40),
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Case 5 – Letter-level mistakes (2 consonant substitutions + 2 vowel errors)
-#
-# Scenario: User completes all 8 ayahs but makes actual letter-substitution
-# mistakes (wrong consonants) in addition to short-vowel errors.
+# Case 5 – Letter mistakes + diacritic + incorrect  (6 mistakes)
 #
 # Mistakes:
-#   Word  3  (خَلَقَ)      – letter_error: خ (kha) → ح (ha)   → "حَلَقَ"
-#   Word  8  (وَالْقَمَرُ) – letter_error: ق (qāf) → غ (ghain)→ "وَالْغَمَرُ"
-#   Word 10  (وَالنَّجْمُ) – vowel_error:  damma ُ on mīm → kasra ِ → "وَالنَّجْمِ"
-#   Word 15  (وَوَضَعَ)    – vowel_error:  fatha َ on ḍad → kasra ِ → "وَوَضِعَ"
+#   Word  1  (عَلَّمَ)      – diacritic_error: shadda on ل missing    → "عَلَمَ"
+#   Word  3  (خَلَقَ)       – letter_error:    خ (pos 0) → ح          → "حَلَقَ"
+#   Word  8  (وَالْقَمَرُ)  – letter_error:    ق (pos 5) → غ          → "وَالْغَمَرُ"
+#   Word 10  (وَالنَّجْمُ)  – vowel_error:     damma on م → kasra     → "وَالنَّجْمِ"
+#   Word 15  (وَوَضَعَ)     – vowel_error:     fatha on ض → kasra     → "وَوَضِعَ"
+#   Word 17  (أَلَّا)       – incorrect:       hamza dropped          → "اللا"
 # ─────────────────────────────────────────────────────────────────────────────
 
 _C5_STATUS = {
-    "type": "status",
-    "verse_id": "55:1-8",
+    "type": "status", "verse_id": "55:1-8",
     "message": "Session started. Ready to receive audio.",
-    "total_words": 21,
-    "total_ayahs": 8,
+    "total_words": 21, "total_ayahs": 8,
 }
 
 _C5_ERR = {
+    1:  "عَلَمَ",
     3:  "حَلَقَ",
     8:  "وَالْغَمَرُ",
     10: "وَالنَّجْمِ",
     15: "وَوَضِعَ",
+    17: "اللا",
 }
 
 _C5_OVR = {
-    3:  ("letter_error", _C5_ERR[3],  _LF_W3_LETTER),
-    8:  ("letter_error", _C5_ERR[8],  _LF_W8_LETTER),
-    10: ("vowel_error",  _C5_ERR[10], _LF_W10_VOWEL),
-    15: ("vowel_error",  _C5_ERR[15], _LF_W15_VOWEL),
+    1:  ("diacritic_error", _C5_ERR[1],  _LF_W1_DIAC),
+    3:  ("letter_error",    _C5_ERR[3],  _LF_W3_LETTER),
+    8:  ("letter_error",    _C5_ERR[8],  _LF_W8_LETTER),
+    10: ("vowel_error",     _C5_ERR[10], _LF_W10_VOWEL),
+    15: ("vowel_error",     _C5_ERR[15], _LF_W15_VOWEL),
+    17: ("incorrect",       _C5_ERR[17], None),
 }
 
+_M5_DIAC = {
+    "word_id": "55:2:1", "word_text": "عَلَّمَ", "word_position": 1,
+    "type": "diacritic_error", "recited_text": _C5_ERR[1],
+    "details": "Shadda (ّ) missing on lam — عَلَّمَ shortened to عَلَمَ",
+    "letter_feedback": _LF_W1_DIAC,
+}
 _M5_LETTER1 = {
-    "word_id": "55:3:1", "word_text": "خَلَقَ",
+    "word_id": "55:3:1", "word_text": "خَلَقَ", "word_position": 3,
     "type": "letter_error", "recited_text": _C5_ERR[3],
-    "details": "خ (kha) recited as ح (ha) — velar fricative confused with pharyngeal",
+    "details": "خَاء (خ) recited as حَاء (ح) — velar fricative vs pharyngeal",
     "letter_feedback": _LF_W3_LETTER,
 }
 _M5_LETTER2 = {
-    "word_id": "55:5:2", "word_text": "وَالْقَمَرُ",
+    "word_id": "55:5:2", "word_text": "وَالْقَمَرُ", "word_position": 8,
     "type": "letter_error", "recited_text": _C5_ERR[8],
-    "details": "ق (qāf) recited as غ (ghain) — uvular stop confused with voiced velar fricative",
+    "details": "قَاف (ق) recited as غَيْن (غ) — uvular stop vs voiced velar fricative",
     "letter_feedback": _LF_W8_LETTER,
 }
 _M5_VOWEL1 = {
-    "word_id": "55:6:1", "word_text": "وَالنَّجْمُ",
+    "word_id": "55:6:1", "word_text": "وَالنَّجْمُ", "word_position": 10,
     "type": "vowel_error", "recited_text": _C5_ERR[10],
     "details": "Damma (ُ) on mīm recited as kasra (ِ) — vowel harmony error",
     "letter_feedback": _LF_W10_VOWEL,
 }
 _M5_VOWEL2 = {
-    "word_id": "55:7:3", "word_text": "وَوَضَعَ",
+    "word_id": "55:7:3", "word_text": "وَوَضَعَ", "word_position": 15,
     "type": "vowel_error", "recited_text": _C5_ERR[15],
-    "details": "Fatha (َ) on ḍad recited as kasra (ِ) — vowel of ḍad changed",
+    "details": "Fatha (َ) on ḍād recited as kasra (ِ) — vowel of ḍād changed",
     "letter_feedback": _LF_W15_VOWEL,
 }
+_M5_INCR = {
+    "word_id": "55:8:1", "word_text": "أَلَّا", "word_position": 17,
+    "type": "incorrect", "recited_text": _C5_ERR[17],
+    "details": "Hamza dropped — أَلَّا recited as اللا",
+}
+
+_C5_ALL = [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2, _M5_INCR]
 
 
 def _c5_tx(cursor: int) -> str:
-    """Cumulative transcription for Case 5 (uses recited forms for error words)."""
     return " ".join(_C5_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
 
 
 def _c5(ci, cursor, ayah, pos, complete, mistakes):
     return {
-        "type": "feedback",
-        "chunk_index": ci,
+        "type": "feedback", "chunk_index": ci,
         "transcribed_text": _c5_tx(cursor),
-        "current_ayah": ayah,
-        "word_cursor": cursor,
-        "position_in_verse": pos,
-        "ayah_complete": complete,
-        "skipped_ayahs": [],
-        "repeated_ayahs": [],
-        "word_feedback": _wf(cursor, _C5_OVR),
-        "mistakes": mistakes,
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C5_OVR), "mistakes": mistakes,
     }
 
 
 _C5_CHUNKS = [
     _c5(1,  0,  1, 0.05, True,  []),
-    _c5(2,  1,  2, 0.10, False, []),
-    _c5(3,  2,  2, 0.14, True,  []),
-    _c5(4,  3,  3, 0.19, False, [_M5_LETTER1]),          # word 3: letter error
-    _c5(5,  4,  3, 0.24, True,  [_M5_LETTER1]),
-    _c5(6,  5,  4, 0.29, False, [_M5_LETTER1]),
-    _c5(7,  6,  4, 0.33, True,  [_M5_LETTER1]),
-    _c5(8,  7,  5, 0.38, False, [_M5_LETTER1]),
-    _c5(9,  8,  5, 0.43, False, [_M5_LETTER1, _M5_LETTER2]), # word 8: letter error
-    _c5(10, 9,  5, 0.48, True,  [_M5_LETTER1, _M5_LETTER2]),
-    _c5(11, 10, 6, 0.52, False, [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]), # word 10: vowel
-    _c5(12, 11, 6, 0.57, False, [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
-    _c5(13, 12, 6, 0.62, True,  [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
-    _c5(14, 13, 7, 0.67, False, [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
-    _c5(15, 14, 7, 0.71, False, [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
-    _c5(16, 15, 7, 0.76, False, [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2]), # word 15: vowel
-    _c5(17, 16, 7, 0.81, True,  [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2]),
-    {
-        "type": "feedback", "chunk_index": 18,
-        "transcribed_text": _c5_tx(18), "current_ayah": 8,
-        "word_cursor": 18, "position_in_verse": 0.90, "ayah_complete": False,
-        "skipped_ayahs": [], "repeated_ayahs": [],
-        "word_feedback": _wf(18, _C5_OVR),
-        "mistakes": [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2],
-    },
-    {
-        "type": "feedback", "chunk_index": 19,
-        "transcribed_text": _c5_tx(20), "current_ayah": 8,
-        "word_cursor": 20, "position_in_verse": 1.00, "ayah_complete": True,
-        "skipped_ayahs": [], "repeated_ayahs": [],
-        "word_feedback": _wf(20, _C5_OVR),
-        "mistakes": [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2],
-    },
+    _c5(2,  1,  2, 0.10, False, [_M5_DIAC]),
+    _c5(3,  2,  2, 0.14, True,  [_M5_DIAC]),
+    _c5(4,  3,  3, 0.19, False, [_M5_DIAC, _M5_LETTER1]),
+    _c5(5,  4,  3, 0.24, True,  [_M5_DIAC, _M5_LETTER1]),
+    _c5(6,  5,  4, 0.29, False, [_M5_DIAC, _M5_LETTER1]),
+    _c5(7,  6,  4, 0.33, True,  [_M5_DIAC, _M5_LETTER1]),
+    _c5(8,  7,  5, 0.38, False, [_M5_DIAC, _M5_LETTER1]),
+    _c5(9,  8,  5, 0.43, False, [_M5_DIAC, _M5_LETTER1, _M5_LETTER2]),
+    _c5(10, 9,  5, 0.48, True,  [_M5_DIAC, _M5_LETTER1, _M5_LETTER2]),
+    _c5(11, 10, 6, 0.52, False, [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
+    _c5(12, 11, 6, 0.57, False, [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
+    _c5(13, 12, 6, 0.62, True,  [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
+    _c5(14, 13, 7, 0.67, False, [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
+    _c5(15, 14, 7, 0.71, False, [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1]),
+    _c5(16, 15, 7, 0.76, False, [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2]),
+    _c5(17, 16, 7, 0.81, True,  [_M5_DIAC, _M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2]),
+    _c5(18, 17, 8, 0.86, False, _C5_ALL),
+    _c5(19, 18, 8, 0.90, False, _C5_ALL),
+    _c5(20, 19, 8, 0.95, False, _C5_ALL),
+    _c5(21, 20, 8, 1.00, True,  _C5_ALL),
 ]
 
-_C5_ALL_MISTAKES = [_M5_LETTER1, _M5_LETTER2, _M5_VOWEL1, _M5_VOWEL2]
+_C5_LM, _C5_WM = _split_mistakes(_C5_ALL)
 
 _C5_SUMMARY = {
-    "type": "session_summary",
-    "verse_id": "55:1-8",
-    "total_chunks": 19,
-    "duration_seconds": 38,
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
     "full_transcription": _c5_tx(20),
-    "total_words": 21,
-    "words_correct": 17,
-    "words_diacritic_error": 0,
-    "words_vowel_error": 2,
-    "words_letter_error": 2,
-    "words_incorrect": 0,
-    "words_not_recited": 0,
-    "total_score": 65,
-    "completion_percentage": 100,
-    "skipped_ayahs": [],
-    "repeated_ayahs": [],
-    "skip_detail": [],
-    "repetition_detail": [],
+    "total_words": 21, "words_correct": 15,
+    "words_diacritic_error": 1, "words_vowel_error": 2,
+    "words_letter_error": 2, "words_incorrect": 1, "words_not_recited": 0,
+    "total_score": 58, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
     "ayah_scores": [
         {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
-        {"ayah": 2, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 2, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "عَلَّمَ — shadda missing"},
         {"ayah": 3, "score": 50,  "words_correct": 1, "words_errors": 1,
-         "note": "خَلَقَ — kha recited as ha (letter substitution)"},
+         "note": "خَلَقَ — khā recited as ḥā"},
         {"ayah": 4, "score": 100, "words_correct": 2, "words_errors": 0},
         {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
-         "note": "وَالْقَمَرُ — qāf recited as ghain (letter substitution)"},
-        {"ayah": 6, "score": 80,  "words_correct": 2, "words_errors": 1,
+         "note": "وَالْقَمَرُ — qāf recited as ghain"},
+        {"ayah": 6, "score": 67,  "words_correct": 2, "words_errors": 1,
          "note": "وَالنَّجْمُ — damma on mīm recited as kasra"},
         {"ayah": 7, "score": 75,  "words_correct": 3, "words_errors": 1,
-         "note": "وَوَضَعَ — fatha on ḍad recited as kasra"},
-        {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
+         "note": "وَوَضَعَ — fatha on ḍād recited as kasra"},
+        {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "أَلَّا — hamza dropped"},
     ],
-    "mistakes": _C5_ALL_MISTAKES,
+    "letter_mistakes": _C5_LM,
+    "word_mistakes":   _C5_WM,
+    "mistakes":        _C5_ALL,
     "overall_feedback": (
-        "4 mistakes detected: 2 letter substitutions and 2 short-vowel errors. "
-        "Critical: خ in خَلَقَ was pronounced as ح — practice the kha sound. "
-        "ق in وَالْقَمَرُ was pronounced as غ — focus on the uvular stop. "
-        "Also review short vowels on وَالنَّجْمُ and وَوَضَعَ."
+        "6 mistakes: shadda dropped from عَلَّمَ; "
+        "خ→ح in خَلَقَ and ق→غ in وَالْقَمَرُ (2 letter errors); "
+        "damma→kasra in وَالنَّجْمُ and fatha→kasra in وَوَضَعَ (2 vowel errors); "
+        "and hamza dropped from أَلَّا. Focus on letter precision and nunation."
     ),
-    "recording": _recording(5, 38),
+    "recording": _recording(5, 40),
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Case 6 – Mixed mistakes: incorrect word + letter error + diacritic + vowel
-#
-# Scenario: User completes all 8 ayahs with one mistake from each major
-# category, spread across different ayahs.
+# Case 6 – Mixed moderate: 1 incorrect + 1 letter + 2 diacritic + 2 vowel  (6 mistakes)
 #
 # Mistakes:
-#   Word  4  (الْإِنسَانَ) – incorrect:       recited as "الانس" (truncated)
-#   Word  7  (الشَّمْسُ)  – letter_error:     ش (shin) → ص (sad)  → "الصَّمْسُ"
-#   Word 11  (وَالشَّجَرُ)– diacritic_error:  shadda on شَّ missing → "وَالشَجَرُ"
-#   Word 17  (أَلَّا)     – vowel_error:      fatha on أ → kasra   → "إِلَّا"
+#   Word  2  (الْقُرْآنَ)  – diacritic_error: sukūn on رْ dropped    → "الْقُرَآنَ"
+#   Word  4  (الْإِنسَانَ) – incorrect:       truncated               → "الانس"
+#   Word  7  (الشَّمْسُ)   – letter_error:    ش (pos 2) → ص          → "الصَّمْسُ"
+#   Word 11  (وَالشَّجَرُ) – diacritic_error: shadda on شَّ dropped   → "وَالشَجَرُ"
+#   Word 15  (وَوَضَعَ)    – vowel_error:     fatha on ض → kasra     → "وَوَضِعَ"
+#   Word 17  (أَلَّا)      – vowel_error:     fatha on أ → kasra     → "إِلَّا"
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Case 6 letter feedback ────────────────────────────────────────────────────
-
-# Word 7 · الشَّمْسُ  → "الصَّمْسُ"  (shin ش substituted by sad ص)
-# letters: ["ا","ل","ش","َّ","م","ْ","س","ُ"]
-_LF_W7_C6_LETTER = [
-    {"position": 0, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
-    {"position": 1, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
-    {"position": 2, "expected_letter": "ش",  "recited_letter": "ص",  "status": "letter_error"},
-    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
-    {"position": 4, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
-    {"position": 5, "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
-    {"position": 6, "expected_letter": "س",  "recited_letter": "س",  "status": "correct"},
-    {"position": 7, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
-]
-
-# Word 11 · وَالشَّجَرُ  → "وَالشَجَرُ"  (shadda on shin dropped)
-# letters: ["و","َ","ا","ل","ش","َّ","ج","َ","ر","ُ"]
-_LF_W11_C6_DIAC = [
-    {"position": 0, "expected_letter": "و",  "recited_letter": "و",  "status": "correct"},
-    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
-    {"position": 2, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
-    {"position": 3, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
-    {"position": 4, "expected_letter": "ش",  "recited_letter": "ش",  "status": "correct"},
-    {"position": 5, "expected_letter": "َّ", "recited_letter": "َ",  "status": "diacritic_error"},
-    {"position": 6, "expected_letter": "ج",  "recited_letter": "ج",  "status": "correct"},
-    {"position": 7, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
-    {"position": 8, "expected_letter": "ر",  "recited_letter": "ر",  "status": "correct"},
-    {"position": 9, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
-]
-
-# Word 17 · أَلَّا  → "إِلَّا"  (fatha on hamza → kasra)
-# letters: ["أ","َ","ل","َّ","ا"]
-_LF_W17_C6_VOWEL = [
-    {"position": 0, "expected_letter": "أ",  "recited_letter": "أ",  "status": "correct"},
-    {"position": 1, "expected_letter": "َ",  "recited_letter": "ِ",  "status": "vowel_error"},
-    {"position": 2, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
-    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
-    {"position": 4, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
-]
-
 _C6_STATUS = {
-    "type": "status",
-    "verse_id": "55:1-8",
+    "type": "status", "verse_id": "55:1-8",
     "message": "Session started. Ready to receive audio.",
-    "total_words": 21,
-    "total_ayahs": 8,
+    "total_words": 21, "total_ayahs": 8,
 }
 
 _C6_ERR = {
+    2:  "الْقُرَآنَ",
     4:  "الانس",
     7:  "الصَّمْسُ",
     11: "وَالشَجَرُ",
+    15: "وَوَضِعَ",
     17: "إِلَّا",
 }
 
 _C6_OVR = {
+    2:  ("diacritic_error", _C6_ERR[2],  _LF_W2_DIAC),
     4:  ("incorrect",       _C6_ERR[4],  None),
-    7:  ("letter_error",    _C6_ERR[7],  _LF_W7_C6_LETTER),
-    11: ("diacritic_error", _C6_ERR[11], _LF_W11_C6_DIAC),
-    17: ("vowel_error",     _C6_ERR[17], _LF_W17_C6_VOWEL),
+    7:  ("letter_error",    _C6_ERR[7],  _LF_W7_LETTER_C6),
+    11: ("diacritic_error", _C6_ERR[11], _LF_W11_DIAC),
+    15: ("vowel_error",     _C6_ERR[15], _LF_W15_VOWEL),
+    17: ("vowel_error",     _C6_ERR[17], _LF_W17_VOWEL),
 }
 
-# Mistake objects for Case 6
+_M6_DIAC1 = {
+    "word_id": "55:2:2", "word_text": "الْقُرْآنَ", "word_position": 2,
+    "type": "diacritic_error", "recited_text": _C6_ERR[2],
+    "details": "Sukūn (ْ) missing from rā — الْقُرْآنَ recited without sukūn on rā",
+    "letter_feedback": _LF_W2_DIAC,
+}
 _M6_INCR = {
-    "word_id": "55:3:2", "word_text": "الْإِنسَانَ",
+    "word_id": "55:3:2", "word_text": "الْإِنسَانَ", "word_position": 4,
     "type": "incorrect", "recited_text": _C6_ERR[4],
     "details": "Word truncated — 'الانس' recited instead of الْإِنسَانَ",
 }
 _M6_LETTER = {
-    "word_id": "55:5:1", "word_text": "الشَّمْسُ",
+    "word_id": "55:5:1", "word_text": "الشَّمْسُ", "word_position": 7,
     "type": "letter_error", "recited_text": _C6_ERR[7],
-    "details": "ش (shin) recited as ص (sad) — emphatic substitution",
-    "letter_feedback": _LF_W7_C6_LETTER,
+    "details": "شِين (ش) recited as صَاد (ص) — emphatic substitution at word start",
+    "letter_feedback": _LF_W7_LETTER_C6,
 }
-_M6_DIAC = {
-    "word_id": "55:6:2", "word_text": "وَالشَّجَرُ",
+_M6_DIAC2 = {
+    "word_id": "55:6:2", "word_text": "وَالشَّجَرُ", "word_position": 11,
     "type": "diacritic_error", "recited_text": _C6_ERR[11],
     "details": "Shadda (ّ) missing on shin — وَالشَّجَرُ shortened to وَالشَجَرُ",
-    "letter_feedback": _LF_W11_C6_DIAC,
+    "letter_feedback": _LF_W11_DIAC,
 }
-_M6_VOWEL = {
-    "word_id": "55:8:1", "word_text": "أَلَّا",
+_M6_VOWEL1 = {
+    "word_id": "55:7:3", "word_text": "وَوَضَعَ", "word_position": 15,
+    "type": "vowel_error", "recited_text": _C6_ERR[15],
+    "details": "Fatha (َ) on ḍād recited as kasra (ِ) — وَوَضَعَ became وَوَضِعَ",
+    "letter_feedback": _LF_W15_VOWEL,
+}
+_M6_VOWEL2 = {
+    "word_id": "55:8:1", "word_text": "أَلَّا", "word_position": 17,
     "type": "vowel_error", "recited_text": _C6_ERR[17],
     "details": "Fatha (َ) on hamza recited as kasra (ِ) — أَلَّا became إِلَّا",
-    "letter_feedback": _LF_W17_C6_VOWEL,
+    "letter_feedback": _LF_W17_VOWEL,
 }
+
+_C6_ALL = [_M6_DIAC1, _M6_INCR, _M6_LETTER, _M6_DIAC2, _M6_VOWEL1, _M6_VOWEL2]
 
 
 def _c6_tx(cursor: int) -> str:
@@ -1175,225 +1563,161 @@ def _c6_tx(cursor: int) -> str:
 
 def _c6(ci, cursor, ayah, pos, complete, mistakes):
     return {
-        "type": "feedback",
-        "chunk_index": ci,
+        "type": "feedback", "chunk_index": ci,
         "transcribed_text": _c6_tx(cursor),
-        "current_ayah": ayah,
-        "word_cursor": cursor,
-        "position_in_verse": pos,
-        "ayah_complete": complete,
-        "skipped_ayahs": [],
-        "repeated_ayahs": [],
-        "word_feedback": _wf(cursor, _C6_OVR),
-        "mistakes": mistakes,
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C6_OVR), "mistakes": mistakes,
     }
 
 
 _C6_CHUNKS = [
     _c6(1,  0,  1, 0.05, True,  []),
     _c6(2,  1,  2, 0.10, False, []),
-    _c6(3,  2,  2, 0.14, True,  []),
-    _c6(4,  3,  3, 0.19, False, []),
-    _c6(5,  4,  3, 0.24, True,  [_M6_INCR]),              # word 4: incorrect
-    _c6(6,  5,  4, 0.29, False, [_M6_INCR]),
-    _c6(7,  6,  4, 0.33, True,  [_M6_INCR]),
-    _c6(8,  7,  5, 0.38, False, [_M6_INCR, _M6_LETTER]),  # word 7: letter error
-    _c6(9,  8,  5, 0.43, False, [_M6_INCR, _M6_LETTER]),
-    _c6(10, 9,  5, 0.48, True,  [_M6_INCR, _M6_LETTER]),
-    _c6(11, 10, 6, 0.52, False, [_M6_INCR, _M6_LETTER]),
-    _c6(12, 11, 6, 0.57, False, [_M6_INCR, _M6_LETTER, _M6_DIAC]),  # word 11: diacritic
-    _c6(13, 12, 6, 0.62, True,  [_M6_INCR, _M6_LETTER, _M6_DIAC]),
-    _c6(14, 13, 7, 0.67, False, [_M6_INCR, _M6_LETTER, _M6_DIAC]),
-    _c6(15, 14, 7, 0.71, False, [_M6_INCR, _M6_LETTER, _M6_DIAC]),
-    _c6(16, 15, 7, 0.76, False, [_M6_INCR, _M6_LETTER, _M6_DIAC]),
-    _c6(17, 16, 7, 0.81, True,  [_M6_INCR, _M6_LETTER, _M6_DIAC]),
-    _c6(18, 17, 8, 0.86, False, [_M6_INCR, _M6_LETTER, _M6_DIAC, _M6_VOWEL]),  # word 17: vowel
-    _c6(19, 18, 8, 0.90, False, [_M6_INCR, _M6_LETTER, _M6_DIAC, _M6_VOWEL]),
-    _c6(20, 19, 8, 0.95, False, [_M6_INCR, _M6_LETTER, _M6_DIAC, _M6_VOWEL]),
-    _c6(21, 20, 8, 1.00, True,  [_M6_INCR, _M6_LETTER, _M6_DIAC, _M6_VOWEL]),
+    _c6(3,  2,  2, 0.14, True,  [_M6_DIAC1]),
+    _c6(4,  3,  3, 0.19, False, [_M6_DIAC1]),
+    _c6(5,  4,  3, 0.24, True,  [_M6_DIAC1, _M6_INCR]),
+    _c6(6,  5,  4, 0.29, False, [_M6_DIAC1, _M6_INCR]),
+    _c6(7,  6,  4, 0.33, True,  [_M6_DIAC1, _M6_INCR]),
+    _c6(8,  7,  5, 0.38, False, [_M6_DIAC1, _M6_INCR, _M6_LETTER]),
+    _c6(9,  8,  5, 0.43, False, [_M6_DIAC1, _M6_INCR, _M6_LETTER]),
+    _c6(10, 9,  5, 0.48, True,  [_M6_DIAC1, _M6_INCR, _M6_LETTER]),
+    _c6(11, 10, 6, 0.52, False, [_M6_DIAC1, _M6_INCR, _M6_LETTER]),
+    _c6(12, 11, 6, 0.57, False, [_M6_DIAC1, _M6_INCR, _M6_LETTER, _M6_DIAC2]),
+    _c6(13, 12, 6, 0.62, True,  [_M6_DIAC1, _M6_INCR, _M6_LETTER, _M6_DIAC2]),
+    _c6(14, 13, 7, 0.67, False, [_M6_DIAC1, _M6_INCR, _M6_LETTER, _M6_DIAC2]),
+    _c6(15, 14, 7, 0.71, False, [_M6_DIAC1, _M6_INCR, _M6_LETTER, _M6_DIAC2]),
+    _c6(16, 15, 7, 0.76, False, [_M6_DIAC1, _M6_INCR, _M6_LETTER, _M6_DIAC2, _M6_VOWEL1]),
+    _c6(17, 16, 7, 0.81, True,  [_M6_DIAC1, _M6_INCR, _M6_LETTER, _M6_DIAC2, _M6_VOWEL1]),
+    _c6(18, 17, 8, 0.86, False, _C6_ALL),
+    _c6(19, 18, 8, 0.90, False, _C6_ALL),
+    _c6(20, 19, 8, 0.95, False, _C6_ALL),
+    _c6(21, 20, 8, 1.00, True,  _C6_ALL),
 ]
 
-_C6_ALL_MISTAKES = [_M6_INCR, _M6_LETTER, _M6_DIAC, _M6_VOWEL]
+_C6_LM, _C6_WM = _split_mistakes(_C6_ALL)
 
 _C6_SUMMARY = {
-    "type": "session_summary",
-    "verse_id": "55:1-8",
-    "total_chunks": 21,
-    "duration_seconds": 40,
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
     "full_transcription": _c6_tx(20),
-    "total_words": 21,
-    "words_correct": 17,
-    "words_diacritic_error": 1,
-    "words_vowel_error": 1,
-    "words_letter_error": 1,
-    "words_incorrect": 1,
-    "words_not_recited": 0,
-    "total_score": 80,
-    "completion_percentage": 100,
-    "skipped_ayahs": [],
-    "repeated_ayahs": [],
-    "skip_detail": [],
-    "repetition_detail": [],
+    "total_words": 21, "words_correct": 15,
+    "words_diacritic_error": 2, "words_vowel_error": 2,
+    "words_letter_error": 1, "words_incorrect": 1, "words_not_recited": 0,
+    "total_score": 65, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
     "ayah_scores": [
         {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
-        {"ayah": 2, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 2, "score": 67,  "words_correct": 1, "words_errors": 1,
+         "note": "الْقُرْآنَ — sukūn on rā dropped"},
         {"ayah": 3, "score": 50,  "words_correct": 1, "words_errors": 1,
          "note": "الْإِنسَانَ recited incorrectly as 'الانس'"},
         {"ayah": 4, "score": 100, "words_correct": 2, "words_errors": 0},
         {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
-         "note": "الشَّمْسُ — shin (ش) recited as sad (ص)"},
+         "note": "الشَّمْسُ — shin substituted with ṣād"},
         {"ayah": 6, "score": 67,  "words_correct": 2, "words_errors": 1,
          "note": "وَالشَّجَرُ — shadda on shin missing"},
-        {"ayah": 7, "score": 100, "words_correct": 4, "words_errors": 0},
+        {"ayah": 7, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "وَوَضَعَ — fatha on ḍād recited as kasra"},
         {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1,
          "note": "أَلَّا — fatha on hamza recited as kasra"},
     ],
-    "mistakes": _C6_ALL_MISTAKES,
+    "letter_mistakes": _C6_LM,
+    "word_mistakes":   _C6_WM,
+    "mistakes":        _C6_ALL,
     "overall_feedback": (
-        "4 mistakes across 4 different categories: "
-        "الْإِنسَانَ was truncated to 'الانس'; "
-        "ش in الشَّمْسُ was substituted with ص; "
-        "shadda was dropped from وَالشَّجَرُ; "
-        "and فتحة on أَلَّا was recited as كسرة. "
-        "Good completion — focus on letter precision and diacritics."
+        "6 mistakes across all categories: sukūn dropped from الْقُرْآنَ; "
+        "الْإِنسَانَ recited incorrectly; shin→ṣād in الشَّمْسُ (letter); "
+        "shadda missing from وَالشَّجَرُ; vowel errors on وَوَضَعَ and أَلَّا. "
+        "Work on letter precision and diacritic consistency."
     ),
     "recording": _recording(6, 40),
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Case 7 – Heavy mixed mistakes: incorrect + letter + 2 diacritics + vowel
-#
-# Scenario: User completes all 8 ayahs with five mistakes spread across
-# multiple error types and ayahs.
+# Case 7 – Mixed heavy: 2 incorrect + 1 letter + 2 diacritic + 2 vowel  (7 mistakes)
 #
 # Mistakes:
-#   Word  2  (الْقُرْآنَ)  – incorrect:       recited as "القراء"
-#   Word  6  (الْبَيَانَ)  – letter_error:     ب (ba) → ف (fa)      → "الْفَيَانَ"
-#   Word  9  (بِحُسْبَانٍ) – diacritic_error:  tanwīn kasra ٍ dropped → "بِحُسْبَانَ"
-#   Word 12  (يَسْجُدَانِ) – diacritic_error:  sukūn ْ on sīn dropped → "يَسَجُدَانِ"
-#   Word 16  (الْمِيزَانَ) – vowel_error:      kasra ِ on mīm → damma ُ → "الْمُيزَانَ"
+#   Word  2  (الْقُرْآنَ)  – incorrect:       wrong form             → "القراء"
+#   Word  3  (خَلَقَ)      – vowel_error:      fatha on ل → damma    → "خَلُقَ"
+#   Word  6  (الْبَيَانَ)  – letter_error:     ب (pos 3) → ف         → "الْفَيَانَ"
+#   Word  9  (بِحُسْبَانٍ) – diacritic_error:  tanwīn kasra dropped   → "بِحُسْبَانَ"
+#   Word 12  (يَسْجُدَانِ) – diacritic_error:  sukūn on سْ dropped    → "يَسَجُدَانِ"
+#   Word 16  (الْمِيزَانَ) – vowel_error:      kasra on م → damma    → "الْمُيزَانَ"
+#   Word 18  (تَطْغَوْا)   – incorrect:        ending dropped         → "تطغو"
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Case 7 letter feedback ────────────────────────────────────────────────────
-
-# Word 6 · الْبَيَانَ  → "الْفَيَانَ"  (ba ب substituted by fa ف)
-# letters: ["ا","ل","ْ","ب","َ","ي","َ","ا","ن","َ"]
-_LF_W6_C7_LETTER = [
-    {"position": 0, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 1, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
-    {"position": 2, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
-    {"position": 3, "expected_letter": "ب", "recited_letter": "ف", "status": "letter_error"},
-    {"position": 4, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 5, "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
-    {"position": 6, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 7, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 8, "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
-    {"position": 9, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-]
-
-# Word 9 · بِحُسْبَانٍ  → "بِحُسْبَانَ"  (tanwīn kasra ٍ dropped)
-# letters: ["ب","ِ","ح","ُ","س","ْ","ب","َ","ا","ن","ٍ"]
-_LF_W9_C7_DIAC = [
-    {"position": 0,  "expected_letter": "ب", "recited_letter": "ب", "status": "correct"},
-    {"position": 1,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
-    {"position": 2,  "expected_letter": "ح", "recited_letter": "ح", "status": "correct"},
-    {"position": 3,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
-    {"position": 4,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
-    {"position": 5,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
-    {"position": 6,  "expected_letter": "ب", "recited_letter": "ب", "status": "correct"},
-    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
-    {"position": 10, "expected_letter": "ٍ", "recited_letter": "",  "status": "diacritic_error"},
-]
-
-# Word 12 · يَسْجُدَانِ  → "يَسَجُدَانِ"  (sukūn ْ on sīn dropped)
-# letters: ["ي","َ","س","ْ","ج","ُ","د","َ","ا","ن","ِ"]
-_LF_W12_C7_DIAC = [
-    {"position": 0,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
-    {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 2,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
-    {"position": 3,  "expected_letter": "ْ", "recited_letter": "",  "status": "diacritic_error"},
-    {"position": 4,  "expected_letter": "ج", "recited_letter": "ج", "status": "correct"},
-    {"position": 5,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
-    {"position": 6,  "expected_letter": "د", "recited_letter": "د", "status": "correct"},
-    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
-    {"position": 10, "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
-]
-
-# Word 16 · الْمِيزَانَ  → "الْمُيزَانَ"  (kasra ِ on mīm → damma ُ)
-# letters: ["ا","ل","ْ","م","ِ","ي","ز","َ","ا","ن","َ"]
-_LF_W16_C7_VOWEL = [
-    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
-    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
-    {"position": 3,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
-    {"position": 4,  "expected_letter": "ِ", "recited_letter": "ُ", "status": "vowel_error"},
-    {"position": 5,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
-    {"position": 6,  "expected_letter": "ز", "recited_letter": "ز", "status": "correct"},
-    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
-    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
-    {"position": 10, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
-]
-
 _C7_STATUS = {
-    "type": "status",
-    "verse_id": "55:1-8",
+    "type": "status", "verse_id": "55:1-8",
     "message": "Session started. Ready to receive audio.",
-    "total_words": 21,
-    "total_ayahs": 8,
+    "total_words": 21, "total_ayahs": 8,
 }
 
 _C7_ERR = {
     2:  "القراء",
+    3:  "خَلُقَ",
     6:  "الْفَيَانَ",
     9:  "بِحُسْبَانَ",
     12: "يَسَجُدَانِ",
     16: "الْمُيزَانَ",
+    18: "تطغو",
 }
 
 _C7_OVR = {
     2:  ("incorrect",       _C7_ERR[2],  None),
-    6:  ("letter_error",    _C7_ERR[6],  _LF_W6_C7_LETTER),
-    9:  ("diacritic_error", _C7_ERR[9],  _LF_W9_C7_DIAC),
-    12: ("diacritic_error", _C7_ERR[12], _LF_W12_C7_DIAC),
-    16: ("vowel_error",     _C7_ERR[16], _LF_W16_C7_VOWEL),
+    3:  ("vowel_error",     _C7_ERR[3],  _LF_W3_VOWEL_C7),
+    6:  ("letter_error",    _C7_ERR[6],  _LF_W6_LETTER),
+    9:  ("diacritic_error", _C7_ERR[9],  _LF_W9_DIAC),
+    12: ("diacritic_error", _C7_ERR[12], _LF_W12_DIAC_C7),
+    16: ("vowel_error",     _C7_ERR[16], _LF_W16_VOWEL_C7),
+    18: ("incorrect",       _C7_ERR[18], None),
 }
 
-# Mistake objects for Case 7
-_M7_INCR = {
-    "word_id": "55:2:2", "word_text": "الْقُرْآنَ",
+_M7_INCR1 = {
+    "word_id": "55:2:2", "word_text": "الْقُرْآنَ", "word_position": 2,
     "type": "incorrect", "recited_text": _C7_ERR[2],
     "details": "الْقُرْآنَ recited as 'القراء' — wrong word form",
 }
+_M7_VOWEL1 = {
+    "word_id": "55:3:1", "word_text": "خَلَقَ", "word_position": 3,
+    "type": "vowel_error", "recited_text": _C7_ERR[3],
+    "details": "Fatha (َ) on lam recited as damma (ُ) — خَلَقَ became خَلُقَ",
+    "letter_feedback": _LF_W3_VOWEL_C7,
+}
 _M7_LETTER = {
-    "word_id": "55:4:2", "word_text": "الْبَيَانَ",
+    "word_id": "55:4:2", "word_text": "الْبَيَانَ", "word_position": 6,
     "type": "letter_error", "recited_text": _C7_ERR[6],
-    "details": "ب (ba) recited as ف (fa) — bilabial/labiodental confusion",
-    "letter_feedback": _LF_W6_C7_LETTER,
+    "details": "بَاء (ب) recited as فَاء (ف) — bilabial/labiodental confusion",
+    "letter_feedback": _LF_W6_LETTER,
 }
 _M7_DIAC1 = {
-    "word_id": "55:5:3", "word_text": "بِحُسْبَانٍ",
+    "word_id": "55:5:3", "word_text": "بِحُسْبَانٍ", "word_position": 9,
     "type": "diacritic_error", "recited_text": _C7_ERR[9],
-    "details": "Tanwīn kasra (ٍ) missing at end — word ends without nunation",
-    "letter_feedback": _LF_W9_C7_DIAC,
+    "details": "Tanwīn kasra (ٍ) missing at end — nunation dropped entirely",
+    "letter_feedback": _LF_W9_DIAC,
 }
 _M7_DIAC2 = {
-    "word_id": "55:6:3", "word_text": "يَسْجُدَانِ",
+    "word_id": "55:6:3", "word_text": "يَسْجُدَانِ", "word_position": 12,
     "type": "diacritic_error", "recited_text": _C7_ERR[12],
-    "details": "Sukūn (ْ) missing on sīn — يَسْجُدَانِ recited as يَسَجُدَانِ",
-    "letter_feedback": _LF_W12_C7_DIAC,
+    "details": "Sukūn (ْ) missing on sīn — يَسْجُدَانِ gained extra syllable يَسَجُدَانِ",
+    "letter_feedback": _LF_W12_DIAC_C7,
 }
-_M7_VOWEL = {
-    "word_id": "55:7:4", "word_text": "الْمِيزَانَ",
+_M7_VOWEL2 = {
+    "word_id": "55:7:4", "word_text": "الْمِيزَانَ", "word_position": 16,
     "type": "vowel_error", "recited_text": _C7_ERR[16],
     "details": "Kasra (ِ) on mīm recited as damma (ُ) — الْمِيزَانَ became الْمُيزَانَ",
-    "letter_feedback": _LF_W16_C7_VOWEL,
+    "letter_feedback": _LF_W16_VOWEL_C7,
 }
+_M7_INCR2 = {
+    "word_id": "55:8:2", "word_text": "تَطْغَوْا", "word_position": 18,
+    "type": "incorrect", "recited_text": _C7_ERR[18],
+    "details": "Ending 'وا' dropped — تَطْغَوْا recited as تطغو",
+}
+
+_C7_ALL = [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL2, _M7_INCR2]
 
 
 def _c7_tx(cursor: int) -> str:
@@ -1402,91 +1726,422 @@ def _c7_tx(cursor: int) -> str:
 
 def _c7(ci, cursor, ayah, pos, complete, mistakes):
     return {
-        "type": "feedback",
-        "chunk_index": ci,
+        "type": "feedback", "chunk_index": ci,
         "transcribed_text": _c7_tx(cursor),
-        "current_ayah": ayah,
-        "word_cursor": cursor,
-        "position_in_verse": pos,
-        "ayah_complete": complete,
-        "skipped_ayahs": [],
-        "repeated_ayahs": [],
-        "word_feedback": _wf(cursor, _C7_OVR),
-        "mistakes": mistakes,
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C7_OVR), "mistakes": mistakes,
     }
 
 
 _C7_CHUNKS = [
     _c7(1,  0,  1, 0.05, True,  []),
     _c7(2,  1,  2, 0.10, False, []),
-    _c7(3,  2,  2, 0.14, True,  [_M7_INCR]),               # word 2: incorrect
-    _c7(4,  3,  3, 0.19, False, [_M7_INCR]),
-    _c7(5,  4,  3, 0.24, True,  [_M7_INCR]),
-    _c7(6,  5,  4, 0.29, False, [_M7_INCR]),
-    _c7(7,  6,  4, 0.33, True,  [_M7_INCR, _M7_LETTER]),   # word 6: letter error
-    _c7(8,  7,  5, 0.38, False, [_M7_INCR, _M7_LETTER]),
-    _c7(9,  8,  5, 0.43, False, [_M7_INCR, _M7_LETTER]),
-    _c7(10, 9,  5, 0.48, True,  [_M7_INCR, _M7_LETTER, _M7_DIAC1]),  # word 9: diacritic
-    _c7(11, 10, 6, 0.52, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1]),
-    _c7(12, 11, 6, 0.57, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1]),
-    _c7(13, 12, 6, 0.62, True,  [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),  # word 12: diacritic
-    _c7(14, 13, 7, 0.67, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),
-    _c7(15, 14, 7, 0.71, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),
-    _c7(16, 15, 7, 0.76, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),
-    _c7(17, 16, 7, 0.81, True,  [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL]),  # word 16: vowel
-    _c7(18, 17, 8, 0.86, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL]),
-    _c7(19, 18, 8, 0.90, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL]),
-    _c7(20, 19, 8, 0.95, False, [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL]),
-    _c7(21, 20, 8, 1.00, True,  [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL]),
+    _c7(3,  2,  2, 0.14, True,  [_M7_INCR1]),
+    _c7(4,  3,  3, 0.19, False, [_M7_INCR1, _M7_VOWEL1]),
+    _c7(5,  4,  3, 0.24, True,  [_M7_INCR1, _M7_VOWEL1]),
+    _c7(6,  5,  4, 0.29, False, [_M7_INCR1, _M7_VOWEL1]),
+    _c7(7,  6,  4, 0.33, True,  [_M7_INCR1, _M7_VOWEL1, _M7_LETTER]),
+    _c7(8,  7,  5, 0.38, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER]),
+    _c7(9,  8,  5, 0.43, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER]),
+    _c7(10, 9,  5, 0.48, True,  [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1]),
+    _c7(11, 10, 6, 0.52, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1]),
+    _c7(12, 11, 6, 0.57, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1]),
+    _c7(13, 12, 6, 0.62, True,  [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),
+    _c7(14, 13, 7, 0.67, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),
+    _c7(15, 14, 7, 0.71, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),
+    _c7(16, 15, 7, 0.76, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1, _M7_DIAC2]),
+    _c7(17, 16, 7, 0.81, True,  [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL2]),
+    _c7(18, 17, 8, 0.86, False, [_M7_INCR1, _M7_VOWEL1, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL2]),
+    _c7(19, 18, 8, 0.90, False, _C7_ALL),
+    _c7(20, 19, 8, 0.95, False, _C7_ALL),
+    _c7(21, 20, 8, 1.00, True,  _C7_ALL),
 ]
 
-_C7_ALL_MISTAKES = [_M7_INCR, _M7_LETTER, _M7_DIAC1, _M7_DIAC2, _M7_VOWEL]
+_C7_LM, _C7_WM = _split_mistakes(_C7_ALL)
 
 _C7_SUMMARY = {
-    "type": "session_summary",
-    "verse_id": "55:1-8",
-    "total_chunks": 21,
-    "duration_seconds": 40,
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
     "full_transcription": _c7_tx(20),
-    "total_words": 21,
-    "words_correct": 16,
-    "words_diacritic_error": 2,
-    "words_vowel_error": 1,
-    "words_letter_error": 1,
-    "words_incorrect": 1,
-    "words_not_recited": 0,
-    "total_score": 68,
-    "completion_percentage": 100,
-    "skipped_ayahs": [],
-    "repeated_ayahs": [],
-    "skip_detail": [],
-    "repetition_detail": [],
+    "total_words": 21, "words_correct": 14,
+    "words_diacritic_error": 2, "words_vowel_error": 2,
+    "words_letter_error": 1, "words_incorrect": 2, "words_not_recited": 0,
+    "total_score": 55, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
     "ayah_scores": [
         {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
         {"ayah": 2, "score": 50,  "words_correct": 1, "words_errors": 1,
-         "note": "الْقُرْآنَ recited incorrectly as 'القراء'"},
-        {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
+         "note": "الْقُرْآنَ recited as 'القراء'"},
+        {"ayah": 3, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "خَلَقَ — fatha on lam raised to damma"},
         {"ayah": 4, "score": 50,  "words_correct": 1, "words_errors": 1,
-         "note": "الْبَيَانَ — ba (ب) recited as fa (ف)"},
+         "note": "الْبَيَانَ — bā recited as fā"},
         {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
-         "note": "بِحُسْبَانٍ — tanwīn kasra dropped at end"},
+         "note": "بِحُسْبَانٍ — tanwīn dropped"},
         {"ayah": 6, "score": 67,  "words_correct": 2, "words_errors": 1,
-         "note": "يَسْجُدَانِ — sukūn on sīn dropped, adding extra syllable"},
+         "note": "يَسْجُدَانِ — sukūn on sīn dropped, extra syllable"},
         {"ayah": 7, "score": 75,  "words_correct": 3, "words_errors": 1,
-         "note": "الْمِيزَانَ — kasra on mīm recited as damma"},
-        {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
+         "note": "الْمِيزَانَ — kasra on mīm raised to damma"},
+        {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "تَطْغَوْا — ending 'وا' dropped"},
     ],
-    "mistakes": _C7_ALL_MISTAKES,
+    "letter_mistakes": _C7_LM,
+    "word_mistakes":   _C7_WM,
+    "mistakes":        _C7_ALL,
     "overall_feedback": (
-        "5 mistakes detected across multiple types: "
-        "الْقُرْآنَ was replaced with an incorrect word; "
-        "ب in الْبَيَانَ was pronounced as ف; "
-        "tanwīn was dropped from بِحُسْبَانٍ; "
-        "sukūn was omitted from يَسْجُدَانِ causing an extra syllable; "
-        "and kasra on الْمِيزَانَ was raised to damma. "
-        "Review letter accuracy and nunation rules carefully."
+        "7 mistakes: القرآن recited incorrectly; vowel raised in خَلَقَ; "
+        "ب→ف in الْبَيَانَ; tanwīn and sukūn dropped (2 diacritics); "
+        "kasra→damma in الْمِيزَانَ; and تَطْغَوْا recited incorrectly. "
+        "Systematic review of harakat and letter articulation needed."
     ),
     "recording": _recording(7, 40),
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 8 – Severe multi-type: 2 incorrect + 2 letter + 2 diacritic + 1 vowel  (7 mistakes)
+#
+# Mistakes:
+#   Word  0  (الرَّحْمَٰنُ) – diacritic_error: shadda on رَّ dropped  → "الرَحْمَٰنُ"
+#   Word  2  (الْقُرْآنَ)   – incorrect:       truncated              → "القرآ"
+#   Word  5  (عَلَّمَهُ)    – letter_error:    ه (pos 6) → ح          → "عَلَّمَحُ"
+#   Word  9  (بِحُسْبَانٍ)  – diacritic_error: tanwīn kasra dropped   → "بِحُسْبَانَ"
+#   Word 11  (وَالشَّجَرُ)  – vowel_error:     damma on ر → fatha     → "وَالشَّجَرَ"
+#   Word 14  (رَفَعَهَا)    – letter_error:    ع (pos 4) → غ          → "رَفَغَهَا"
+#   Word 18  (تَطْغَوْا)    – incorrect:       ending dropped         → "تطغو"
+# ─────────────────────────────────────────────────────────────────────────────
+
+_C8_STATUS = {
+    "type": "status", "verse_id": "55:1-8",
+    "message": "Session started. Ready to receive audio.",
+    "total_words": 21, "total_ayahs": 8,
+}
+
+_C8_ERR = {
+    0:  "الرَحْمَٰنُ",
+    2:  "القرآ",
+    5:  "عَلَّمَحُ",
+    9:  "بِحُسْبَانَ",
+    11: "وَالشَّجَرَ",
+    14: "رَفَغَهَا",
+    18: "تطغو",
+}
+
+_C8_OVR = {
+    0:  ("diacritic_error", _C8_ERR[0],  _LF_W0_DIAC),
+    2:  ("incorrect",       _C8_ERR[2],  None),
+    5:  ("letter_error",    _C8_ERR[5],  _LF_W5_LETTER),
+    9:  ("diacritic_error", _C8_ERR[9],  _LF_W9_DIAC),
+    11: ("vowel_error",     _C8_ERR[11], _LF_W11_VOWEL),
+    14: ("letter_error",    _C8_ERR[14], _LF_W14_LETTER_C8),
+    18: ("incorrect",       _C8_ERR[18], None),
+}
+
+_M8_DIAC1 = {
+    "word_id": "55:1:1", "word_text": "الرَّحْمَٰنُ", "word_position": 0,
+    "type": "diacritic_error", "recited_text": _C8_ERR[0],
+    "details": "Shadda (ّ) missing from rā — الرَّحْمَٰنُ recited without tashdīd",
+    "letter_feedback": _LF_W0_DIAC,
+}
+_M8_INCR1 = {
+    "word_id": "55:2:2", "word_text": "الْقُرْآنَ", "word_position": 2,
+    "type": "incorrect", "recited_text": _C8_ERR[2],
+    "details": "الْقُرْآنَ truncated — recited as 'القرآ' without the final syllable",
+}
+_M8_LETTER1 = {
+    "word_id": "55:4:1", "word_text": "عَلَّمَهُ", "word_position": 5,
+    "type": "letter_error", "recited_text": _C8_ERR[5],
+    "details": "هَاء (ه) recited as حَاء (ح) — glottal vs pharyngeal confusion",
+    "letter_feedback": _LF_W5_LETTER,
+}
+_M8_DIAC2 = {
+    "word_id": "55:5:3", "word_text": "بِحُسْبَانٍ", "word_position": 9,
+    "type": "diacritic_error", "recited_text": _C8_ERR[9],
+    "details": "Tanwīn kasra (ٍ) missing — بِحُسْبَانٍ recited as بِحُسْبَانَ",
+    "letter_feedback": _LF_W9_DIAC,
+}
+_M8_VOWEL = {
+    "word_id": "55:6:2", "word_text": "وَالشَّجَرُ", "word_position": 11,
+    "type": "vowel_error", "recited_text": _C8_ERR[11],
+    "details": "Damma (ُ) on rā recited as fatha (َ) — وَالشَّجَرُ became وَالشَّجَرَ",
+    "letter_feedback": _LF_W11_VOWEL,
+}
+_M8_LETTER2 = {
+    "word_id": "55:7:2", "word_text": "رَفَعَهَا", "word_position": 14,
+    "type": "letter_error", "recited_text": _C8_ERR[14],
+    "details": "عَيْن (ع) recited as غَيْن (غ) — voiced pharyngeal vs velar fricative",
+    "letter_feedback": _LF_W14_LETTER_C8,
+}
+_M8_INCR2 = {
+    "word_id": "55:8:2", "word_text": "تَطْغَوْا", "word_position": 18,
+    "type": "incorrect", "recited_text": _C8_ERR[18],
+    "details": "Ending 'وا' dropped — تَطْغَوْا recited as تطغو",
+}
+
+_C8_ALL = [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL, _M8_LETTER2, _M8_INCR2]
+
+
+def _c8_tx(cursor: int) -> str:
+    return " ".join(_C8_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
+
+
+def _c8(ci, cursor, ayah, pos, complete, mistakes):
+    return {
+        "type": "feedback", "chunk_index": ci,
+        "transcribed_text": _c8_tx(cursor),
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C8_OVR), "mistakes": mistakes,
+    }
+
+
+_C8_CHUNKS = [
+    _c8(1,  0,  1, 0.05, True,  [_M8_DIAC1]),
+    _c8(2,  1,  2, 0.10, False, [_M8_DIAC1]),
+    _c8(3,  2,  2, 0.14, True,  [_M8_DIAC1, _M8_INCR1]),
+    _c8(4,  3,  3, 0.19, False, [_M8_DIAC1, _M8_INCR1]),
+    _c8(5,  4,  3, 0.24, True,  [_M8_DIAC1, _M8_INCR1]),
+    _c8(6,  5,  4, 0.29, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1]),
+    _c8(7,  6,  4, 0.33, True,  [_M8_DIAC1, _M8_INCR1, _M8_LETTER1]),
+    _c8(8,  7,  5, 0.38, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1]),
+    _c8(9,  8,  5, 0.43, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1]),
+    _c8(10, 9,  5, 0.48, True,  [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2]),
+    _c8(11, 10, 6, 0.52, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2]),
+    _c8(12, 11, 6, 0.57, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL]),
+    _c8(13, 12, 6, 0.62, True,  [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL]),
+    _c8(14, 13, 7, 0.67, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL]),
+    _c8(15, 14, 7, 0.71, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL, _M8_LETTER2]),
+    _c8(16, 15, 7, 0.76, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL, _M8_LETTER2]),
+    _c8(17, 16, 7, 0.81, True,  [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL, _M8_LETTER2]),
+    _c8(18, 17, 8, 0.86, False, [_M8_DIAC1, _M8_INCR1, _M8_LETTER1, _M8_DIAC2, _M8_VOWEL, _M8_LETTER2]),
+    _c8(19, 18, 8, 0.90, False, _C8_ALL),
+    _c8(20, 19, 8, 0.95, False, _C8_ALL),
+    _c8(21, 20, 8, 1.00, True,  _C8_ALL),
+]
+
+_C8_LM, _C8_WM = _split_mistakes(_C8_ALL)
+
+_C8_SUMMARY = {
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
+    "full_transcription": _c8_tx(20),
+    "total_words": 21, "words_correct": 14,
+    "words_diacritic_error": 2, "words_vowel_error": 1,
+    "words_letter_error": 2, "words_incorrect": 2, "words_not_recited": 0,
+    "total_score": 52, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
+    "ayah_scores": [
+        {"ayah": 1, "score": 50,  "words_correct": 0, "words_errors": 1,
+         "note": "الرَّحْمَٰنُ — shadda on rā missing"},
+        {"ayah": 2, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "الْقُرْآنَ — truncated to 'القرآ'"},
+        {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 4, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "عَلَّمَهُ — hā recited as ḥā"},
+        {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "بِحُسْبَانٍ — tanwīn dropped"},
+        {"ayah": 6, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "وَالشَّجَرُ — damma on rā dropped to fatha"},
+        {"ayah": 7, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "رَفَعَهَا — ʿayn recited as ghain"},
+        {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "تَطْغَوْا — ending dropped"},
+    ],
+    "letter_mistakes": _C8_LM,
+    "word_mistakes":   _C8_WM,
+    "mistakes":        _C8_ALL,
+    "overall_feedback": (
+        "7 mistakes across 4 categories: "
+        "shadda dropped from الرَّحْمَٰنُ and tanwīn from بِحُسْبَانٍ (2 diacritics); "
+        "ه→ح in عَلَّمَهُ and ع→غ in رَفَعَهَا (2 letter errors); "
+        "damma→fatha in وَالشَّجَرُ (vowel); "
+        "الْقُرْآنَ and تَطْغَوْا recited incorrectly. "
+        "Serious practice of pharyngeal letters and diacritics required."
+    ),
+    "recording": _recording(8, 40),
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 9 – Extreme chaos: 1 incorrect + 3 letter + 2 diacritic + 2 vowel  (8 mistakes)
+#
+# Mistakes:
+#   Word  1  (عَلَّمَ)      – diacritic_error: shadda on ل dropped    → "عَلَمَ"
+#   Word  4  (الْإِنسَانَ)  – letter_error:    ن (pos 5) → م          → "الْإِمسَانَ"
+#   Word  5  (عَلَّمَهُ)    – vowel_error:     damma on ه → kasra     → "عَلَّمَهِ"
+#   Word  8  (وَالْقَمَرُ)  – letter_error:    ق (pos 5) → ك          → "وَالْكَمَرُ"
+#   Word 10  (وَالنَّجْمُ)  – diacritic_error: shadda on نَّ dropped   → "وَالنَجْمُ"
+#   Word 13  (وَالسَّمَاءَ) – incorrect:       wrong word             → "والأرض"
+#   Word 15  (وَوَضَعَ)     – vowel_error:     fatha on ض → kasra     → "وَوَضِعَ"
+#   Word 17  (أَلَّا)       – letter_error:    ل (pos 2) → ن          → "أَنَّا"
+# ─────────────────────────────────────────────────────────────────────────────
+
+_C9_STATUS = {
+    "type": "status", "verse_id": "55:1-8",
+    "message": "Session started. Ready to receive audio.",
+    "total_words": 21, "total_ayahs": 8,
+}
+
+_C9_ERR = {
+    1:  "عَلَمَ",
+    4:  "الْإِمسَانَ",
+    5:  "عَلَّمَهِ",
+    8:  "وَالْكَمَرُ",
+    10: "وَالنَجْمُ",
+    13: "والأرض",
+    15: "وَوَضِعَ",
+    17: "أَنَّا",
+}
+
+_C9_OVR = {
+    1:  ("diacritic_error", _C9_ERR[1],  _LF_W1_DIAC),
+    4:  ("letter_error",    _C9_ERR[4],  _LF_W4_LETTER),
+    5:  ("vowel_error",     _C9_ERR[5],  _LF_W5_VOWEL),
+    8:  ("letter_error",    _C9_ERR[8],  _LF_W8_LETTER_C9),
+    10: ("diacritic_error", _C9_ERR[10], _LF_W10_DIAC),
+    13: ("incorrect",       _C9_ERR[13], None),
+    15: ("vowel_error",     _C9_ERR[15], _LF_W15_VOWEL),
+    17: ("letter_error",    _C9_ERR[17], _LF_W17_LETTER),
+}
+
+_M9_DIAC1 = {
+    "word_id": "55:2:1", "word_text": "عَلَّمَ", "word_position": 1,
+    "type": "diacritic_error", "recited_text": _C9_ERR[1],
+    "details": "Shadda (ّ) missing from lam — عَلَّمَ became عَلَمَ (double consonant lost)",
+    "letter_feedback": _LF_W1_DIAC,
+}
+_M9_LETTER1 = {
+    "word_id": "55:3:2", "word_text": "الْإِنسَانَ", "word_position": 4,
+    "type": "letter_error", "recited_text": _C9_ERR[4],
+    "details": "نُون (ن, pos 5) recited as مِيم (م) — nasal confusion",
+    "letter_feedback": _LF_W4_LETTER,
+}
+_M9_VOWEL1 = {
+    "word_id": "55:4:1", "word_text": "عَلَّمَهُ", "word_position": 5,
+    "type": "vowel_error", "recited_text": _C9_ERR[5],
+    "details": "Damma (ُ) on hā recited as kasra (ِ) — عَلَّمَهُ became عَلَّمَهِ",
+    "letter_feedback": _LF_W5_VOWEL,
+}
+_M9_LETTER2 = {
+    "word_id": "55:5:2", "word_text": "وَالْقَمَرُ", "word_position": 8,
+    "type": "letter_error", "recited_text": _C9_ERR[8],
+    "details": "قَاف (ق) recited as كَاف (ك) — uvular vs velar stop confusion",
+    "letter_feedback": _LF_W8_LETTER_C9,
+}
+_M9_DIAC2 = {
+    "word_id": "55:6:1", "word_text": "وَالنَّجْمُ", "word_position": 10,
+    "type": "diacritic_error", "recited_text": _C9_ERR[10],
+    "details": "Shadda (ّ) missing from nūn — وَالنَّجْمُ recited as وَالنَجْمُ",
+    "letter_feedback": _LF_W10_DIAC,
+}
+_M9_INCR = {
+    "word_id": "55:7:1", "word_text": "وَالسَّمَاءَ", "word_position": 13,
+    "type": "incorrect", "recited_text": _C9_ERR[13],
+    "details": "Completely wrong word recited — 'والأرض' instead of وَالسَّمَاءَ",
+}
+_M9_VOWEL2 = {
+    "word_id": "55:7:3", "word_text": "وَوَضَعَ", "word_position": 15,
+    "type": "vowel_error", "recited_text": _C9_ERR[15],
+    "details": "Fatha (َ) on ḍād recited as kasra (ِ) — وَوَضَعَ became وَوَضِعَ",
+    "letter_feedback": _LF_W15_VOWEL,
+}
+_M9_LETTER3 = {
+    "word_id": "55:8:1", "word_text": "أَلَّا", "word_position": 17,
+    "type": "letter_error", "recited_text": _C9_ERR[17],
+    "details": "لَام (ل, pos 2) recited as نُون (ن) — أَلَّا became أَنَّا",
+    "letter_feedback": _LF_W17_LETTER,
+}
+
+_C9_ALL = [
+    _M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2,
+    _M9_DIAC2, _M9_INCR, _M9_VOWEL2, _M9_LETTER3,
+]
+
+
+def _c9_tx(cursor: int) -> str:
+    return " ".join(_C9_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
+
+
+def _c9(ci, cursor, ayah, pos, complete, mistakes):
+    return {
+        "type": "feedback", "chunk_index": ci,
+        "transcribed_text": _c9_tx(cursor),
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C9_OVR), "mistakes": mistakes,
+    }
+
+
+_C9_CHUNKS = [
+    _c9(1,  0,  1, 0.05, True,  []),
+    _c9(2,  1,  2, 0.10, False, [_M9_DIAC1]),
+    _c9(3,  2,  2, 0.14, True,  [_M9_DIAC1]),
+    _c9(4,  3,  3, 0.19, False, [_M9_DIAC1]),
+    _c9(5,  4,  3, 0.24, True,  [_M9_DIAC1, _M9_LETTER1]),
+    _c9(6,  5,  4, 0.29, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1]),
+    _c9(7,  6,  4, 0.33, True,  [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1]),
+    _c9(8,  7,  5, 0.38, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1]),
+    _c9(9,  8,  5, 0.43, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2]),
+    _c9(10, 9,  5, 0.48, True,  [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2]),
+    _c9(11, 10, 6, 0.52, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2, _M9_DIAC2]),
+    _c9(12, 11, 6, 0.57, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2, _M9_DIAC2]),
+    _c9(13, 12, 6, 0.62, True,  [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2, _M9_DIAC2]),
+    _c9(14, 13, 7, 0.67, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2, _M9_DIAC2, _M9_INCR]),
+    _c9(15, 14, 7, 0.71, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2, _M9_DIAC2, _M9_INCR]),
+    _c9(16, 15, 7, 0.76, False, [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2, _M9_DIAC2, _M9_INCR, _M9_VOWEL2]),
+    _c9(17, 16, 7, 0.81, True,  [_M9_DIAC1, _M9_LETTER1, _M9_VOWEL1, _M9_LETTER2, _M9_DIAC2, _M9_INCR, _M9_VOWEL2]),
+    _c9(18, 17, 8, 0.86, False, _C9_ALL),
+    _c9(19, 18, 8, 0.90, False, _C9_ALL),
+    _c9(20, 19, 8, 0.95, False, _C9_ALL),
+    _c9(21, 20, 8, 1.00, True,  _C9_ALL),
+]
+
+_C9_LM, _C9_WM = _split_mistakes(_C9_ALL)
+
+_C9_SUMMARY = {
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 42,
+    "full_transcription": _c9_tx(20),
+    "total_words": 21, "words_correct": 13,
+    "words_diacritic_error": 2, "words_vowel_error": 2,
+    "words_letter_error": 3, "words_incorrect": 1, "words_not_recited": 0,
+    "total_score": 42, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
+    "ayah_scores": [
+        {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
+        {"ayah": 2, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "عَلَّمَ — shadda missing from lam"},
+        {"ayah": 3, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "الْإِنسَانَ — nūn (pos 5) recited as mīm"},
+        {"ayah": 4, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "عَلَّمَهُ — damma on hā recited as kasra"},
+        {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "وَالْقَمَرُ — qāf recited as kāf"},
+        {"ayah": 6, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "وَالنَّجْمُ — shadda missing from nūn"},
+        {"ayah": 7, "score": 25,  "words_correct": 1, "words_errors": 3,
+         "note": "وَالسَّمَاءَ recited incorrectly; وَوَضَعَ vowel error; أَلَّا lām→nūn"},
+        {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
+    ],
+    "letter_mistakes": _C9_LM,
+    "word_mistakes":   _C9_WM,
+    "mistakes":        _C9_ALL,
+    "overall_feedback": (
+        "8 mistakes — critical practice required: "
+        "shadda dropped from عَلَّمَ and وَالنَّجْمُ (2 diacritics); "
+        "ن→م in الْإِنسَانَ, ق→ك in وَالْقَمَرُ, ل→ن in أَلَّا (3 letter errors); "
+        "damma→kasra in عَلَّمَهُ and fatha→kasra in وَوَضَعَ (2 vowel errors); "
+        "and وَالسَّمَاءَ recited as a completely wrong word. "
+        "Focused drill on each of these words is strongly recommended."
+    ),
+    "recording": _recording(9, 42),
 }
 
 
@@ -1502,4 +2157,6 @@ CASE_DATA = {
     5: {"status": _C5_STATUS, "chunks": _C5_CHUNKS, "summary": _C5_SUMMARY},
     6: {"status": _C6_STATUS, "chunks": _C6_CHUNKS, "summary": _C6_SUMMARY},
     7: {"status": _C7_STATUS, "chunks": _C7_CHUNKS, "summary": _C7_SUMMARY},
+    8: {"status": _C8_STATUS, "chunks": _C8_CHUNKS, "summary": _C8_SUMMARY},
+    9: {"status": _C9_STATUS, "chunks": _C9_CHUNKS, "summary": _C9_SUMMARY},
 }
