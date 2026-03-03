@@ -1,35 +1,92 @@
 """
-Mock response data for all 9 test cases.
+Mock response data for all 12 test cases  (Surah Ar-Rahman 55:1–8).
 
-Case 1 – Smooth recitation:          1 vowel error + 1 letter error + 1 diacritic + 1 incorrect word
-Case 2 – Repeat + mistakes:          user repeats Ayah 1 + 1 diacritic + 1 vowel error
-Case 3 – Skip + mistakes:            user skips Ayah 2 + 1 diacritic + 1 letter error
-Case 4 – Heavy harakat + extra:      3 diacritic + 2 vowel + 1 letter + 1 incorrect (7 mistakes)
-Case 5 – Letter mistakes + extra:    2 letter + 2 vowel + 1 diacritic + 1 incorrect (6 mistakes)
-Case 6 – Mixed (moderate):           1 incorrect + 1 letter + 2 diacritic + 2 vowel (6 mistakes)
-Case 7 – Mixed (heavy):              2 incorrect + 1 letter + 2 diacritic + 2 vowel (7 mistakes)
-Case 8 – Severe multi-type:          2 incorrect + 2 letter + 2 diacritic + 1 vowel (7 mistakes)
-Case 9 – Extreme chaos:              1 incorrect + 3 letter + 2 diacritic + 2 vowel (8 mistakes)
+Cases 1–9: harakat / letter / word-level mistakes
+──────────────────────────────────────────────────
+  Case  1 – Smooth recitation:       1 vowel + 1 letter + 1 diacritic + 1 incorrect  (4 mistakes)
+  Case  2 – Repeat + mistakes:       user repeats Ayah 1 + 1 diacritic + 1 vowel     (2 mistakes)
+  Case  3 – Skip + mistakes:         user skips Ayah 2 + 1 diacritic + 1 letter      (2 mistakes)
+  Case  4 – Heavy harakat:           3 diacritic + 2 vowel + 1 letter + 1 incorrect  (7 mistakes)
+  Case  5 – Letter focus:            2 letter + 2 vowel + 1 diacritic + 1 incorrect  (6 mistakes)
+  Case  6 – Mixed moderate:          1 incorrect + 1 letter + 2 diacritic + 2 vowel  (6 mistakes)
+  Case  7 – Mixed heavy:             2 incorrect + 1 letter + 2 diacritic + 2 vowel  (7 mistakes)
+  Case  8 – Severe multi-type:       2 incorrect + 2 letter + 2 diacritic + 1 vowel  (7 mistakes)
+  Case  9 – Extreme chaos:           1 incorrect + 3 letter + 2 diacritic + 2 vowel  (8 mistakes)
+
+Cases 10–12: tajweed / pronunciation (makhraj) mistakes
+────────────────────────────────────────────────────────
+  Case 10 – Throat (الحلق) makhraj:
+      All 4 mistakes involve confusing the three throat articulation zones:
+        • الرَّحْمَٰنُ  – ح (middle_throat) → ه (lower_throat)   [throat too relaxed]
+        • عَلَّمَ       – ع (middle_throat) → غ (upper_throat)   [retracted too deep]
+        • بِحُسْبَانٍ   – ح (middle_throat) → خ (upper_throat)   [velarised/too deep]
+        • وَوَضَعَ      – ع (middle_throat) → ه (lower_throat)   [no pharyngeal constriction]
+
+  Case 11 – Tongue (اللسان) makhraj + tafkheem:
+      Tongue-blade vs. sibilant confusion and emphatic vs. plain alveolar:
+        • الشَّمْسُ    – ش (tongue_middle) → س (sibilant)        [tongue blade flattened]
+        • وَالشَّجَرُ  – ش (tongue_middle) → س (sibilant)        [recurring tongue error]
+        • يَسْجُدَانِ  – ج (tongue_middle) → ز (sibilant)        [stop phase omitted]
+        • تَطْغَوْا    – ط (alveolar emph.) → ت (alveolar plain) [tafkheem missing]
+
+  Case 12 – Mixed makhraj (velar / nasal / lips / sibilant voicing):
+      Four different articulation zones, one mistake each:
+        • الْقُرْآنَ   – ق (velar back)  → ك (velar front)       [tongue not far enough back]
+        • الْإِنسَانَ  – ن (nasal)       → ل (lateral)           [nasal cavity not engaged]
+        • الْبَيَانَ   – ب (lips, oral)  → م (nasal bilabial)    [velum not raised]
+        • الْمِيزَانَ  – ز (sibilant, voiced) → س (unvoiced)     [vocal cords not vibrating]
 
 Word-feedback status values
 ───────────────────────────
-  "correct"        – base letters AND harakat match perfectly
-  "diacritic_error"– base letters correct; a non-vowel diacritic wrong/missing
-                     (shadda, tanwin, sukun …)
-  "vowel_error"    – base letters correct; a short vowel wrong
-                     (fatha↔kasra↔damma confused)
-  "incorrect"      – wrong word entirely (base consonants differ significantly)
-  "letter_error"   – a specific consonant letter substituted (e.g. خ → ح)
-  "not_recited"    – word not reached yet
+  "correct"         – base letters AND harakat match perfectly
+  "diacritic_error" – base letters correct; a non-vowel diacritic wrong/missing
+                      (shadda, tanwin, sukun …)
+  "vowel_error"     – base letters correct; a short vowel wrong
+                      (fatha ↔ kasra ↔ damma confused)
+  "incorrect"       – wrong word entirely (base consonants differ significantly)
+  "letter_error"    – a specific consonant letter substituted (e.g. خ → ح);
+                      in tajweed cases (10–12) this also carries a tajweed_detail
+                      block (see below) identifying the makhraj violation.
+  "not_recited"     – word not reached yet
 
-Summary structure
-─────────────────
-  Each session_summary contains:
+Summary structure  (session_summary fields)
+────────────────────────────────────────────
   • "letter_mistakes"  – list of diacritic_error / vowel_error / letter_error entries,
-                         each with word_position (0-based verse index) and full
-                         letter_feedback array pinning the error to the exact letter pos.
-  • "word_mistakes"    – list of incorrect entries, each with word_position reference.
+                         each with word_position (0-based verse index) and a full
+                         letter_feedback array that pins the error to the exact char pos.
+  • "word_mistakes"    – list of incorrect entries, each with a word_position reference.
   • "mistakes"         – flat combined list (backward-compat shorthand).
+  • "tajweed_focus"    – present on cases 10–12; indicates the primary makhraj category
+                         ("middle_throat" | "tongue_middle" | "mixed_makhraj").
+
+Tajweed detail block  (cases 10–12 only)
+─────────────────────────────────────────
+  Present on every tajweed letter_error at two levels:
+    1. mistake object  →  mistake["tajweed_detail"]
+    2. erroneous entry →  mistake["letter_feedback"][n]["tajweed_detail"]
+
+  Schema (mirrors Tajweed_rule.json exactly):
+    {
+      "expected_rule": {          ← where the letter SHOULD come from
+        "id":          str,       e.g. "middle_throat"
+        "name":        str,       e.g. "Middle Throat"
+        "arabicName":  str,       e.g. "وسط الحلق"
+        "description": str,       e.g. "Middle section of the throat"
+        "letters":     [str],     e.g. ["ع", "ح"]
+        "color":       str,       HEX  e.g. "#00838F"
+        "textColor":   str,       HEX  e.g. "#fff"
+        "cx":          int,       SVG ellipse centre-x
+        "cy":          int,       SVG ellipse centre-y
+        "rx":          int,       SVG ellipse x-radius
+        "ry":          int        SVG ellipse y-radius
+      },
+      "recited_rule":  { … },     ← same schema; makhraj actually used
+      "instruction":   str        ← plain-English correction tip
+    }
+
+  The cx/cy/rx/ry values are taken directly from Tajweed_rule.json and can be
+  used by the frontend to highlight the correct vs. recited articulation zones
+  on the interactive mouth/throat diagram.
 """
 
 import base64
@@ -109,8 +166,11 @@ MOCK_WAVS: Dict[int, str] = {
     5: _make_mock_wav(293.66),   # D4
     6: _make_mock_wav(261.63),   # C4
     7: _make_mock_wav(329.63),   # E4
-    8: _make_mock_wav(246.94),   # B3
-    9: _make_mock_wav(220.00),   # A3
+    8:  _make_mock_wav(246.94),   # B3
+    9:  _make_mock_wav(220.00),   # A3
+    10: _make_mock_wav(196.00),   # G3  – tajweed: throat makhraj
+    11: _make_mock_wav(174.61),   # F3  – tajweed: tongue makhraj
+    12: _make_mock_wav(164.81),   # E3  – tajweed: mixed makhraj
 }
 
 
@@ -2146,17 +2206,872 @@ _C9_SUMMARY = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Tajweed rule lookup  (mirrors Tajweed_rule.json — embedded for runtime use)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TJ: Dict[str, Dict] = {
+    "nasal": {
+        "id": "nasal", "name": "Nasal", "arabicName": "الخيشوم",
+        "description": "Sound resonates through the nasal cavity",
+        "letters": ["ن", "م"],
+        "color": "#E8760D", "textColor": "#fff",
+        "cx": 628, "cy": 42, "rx": 52, "ry": 33,
+    },
+    "jauf": {
+        "id": "jauf", "name": "Cave (Jauf)", "arabicName": "الجوف",
+        "description": "Empty space in mouth & throat — long vowels",
+        "letters": ["ا", "ي", "و"],
+        "color": "#D2C8FF38", "textColor": "#FFFFFFEB",
+        "cx": 348, "cy": 73, "rx": 95, "ry": 36,
+    },
+    "tongue_middle": {
+        "id": "tongue_middle", "name": "Tongue Blade", "arabicName": "وسط اللسان",
+        "description": "Middle of tongue against the middle palate",
+        "letters": ["ج", "ش"],
+        "color": "#388E3C", "textColor": "#fff",
+        "cx": 308, "cy": 208, "rx": 68, "ry": 46,
+    },
+    "interdental": {
+        "id": "interdental", "name": "Interdental", "arabicName": "ما بين الأسنان",
+        "description": "Tip of tongue placed between the upper & lower teeth",
+        "letters": ["ظ", "ذ", "ث"],
+        "color": "#8E24AA", "textColor": "#fff",
+        "cx": 532, "cy": 168, "rx": 60, "ry": 40,
+    },
+    "alveolar": {
+        "id": "alveolar", "name": "Alveolar", "arabicName": "طرف اللسان",
+        "description": "Tongue tip touches the upper gum ridge",
+        "letters": ["ط", "د", "ت"],
+        "color": "#C62828", "textColor": "#fff",
+        "cx": 554, "cy": 245, "rx": 56, "ry": 38,
+    },
+    "sibilant": {
+        "id": "sibilant", "name": "Sibilant", "arabicName": "الأسنان واللسان",
+        "description": "Hissing sounds formed at teeth and tongue tip",
+        "letters": ["ز", "س", "ص"],
+        "color": "#AD1457", "textColor": "#fff",
+        "cx": 534, "cy": 308, "rx": 58, "ry": 38,
+    },
+    "lateral": {
+        "id": "lateral", "name": "Lateral", "arabicName": "حافة اللسان",
+        "description": "Side edge of tongue against upper teeth",
+        "letters": ["ل"],
+        "color": "#E91E63", "textColor": "#fff",
+        "cx": 452, "cy": 270, "rx": 38, "ry": 38,
+    },
+    "velar": {
+        "id": "velar", "name": "Velar", "arabicName": "أقصى اللسان",
+        "description": "Back of tongue against the soft palate",
+        "letters": ["ق", "ك"],
+        "color": "#1565C0", "textColor": "#fff",
+        "cx": 235, "cy": 238, "rx": 54, "ry": 40,
+    },
+    "tongue_side": {
+        "id": "tongue_side", "name": "Tongue Side", "arabicName": "جانب اللسان",
+        "description": "Side of tongue against upper molars",
+        "letters": ["ض"],
+        "color": "#D81B60", "textColor": "#fff",
+        "cx": 352, "cy": 308, "rx": 50, "ry": 42,
+    },
+    "upper_throat": {
+        "id": "upper_throat", "name": "Upper Throat", "arabicName": "أقصى الحلق",
+        "description": "Deepest part of the throat — near the larynx",
+        "letters": ["غ", "خ"],
+        "color": "#00838F", "textColor": "#fff",
+        "cx": 87, "cy": 200, "rx": 48, "ry": 34,
+    },
+    "middle_throat": {
+        "id": "middle_throat", "name": "Middle Throat", "arabicName": "وسط الحلق",
+        "description": "Middle section of the throat",
+        "letters": ["ع", "ح"],
+        "color": "#00838F", "textColor": "#fff",
+        "cx": 87, "cy": 278, "rx": 48, "ry": 34,
+    },
+    "lower_throat": {
+        "id": "lower_throat", "name": "Lower Throat", "arabicName": "أدنى الحلق",
+        "description": "Lowest part of the throat close to the chest",
+        "letters": ["ء", "ه"],
+        "color": "#006064", "textColor": "#fff",
+        "cx": 87, "cy": 356, "rx": 48, "ry": 34,
+    },
+    "lips": {
+        "id": "lips", "name": "Lips", "arabicName": "الشفتان",
+        "description": "Both lips come together or almost meet",
+        "letters": ["ب", "و", "ف", "م"],
+        "color": "#1976D2", "textColor": "#fff",
+        "cx": 648, "cy": 280, "rx": 62, "ry": 42,
+    },
+}
+
+
+def _tj(expected_rule: str, recited_rule: str, instruction: str) -> Dict:
+    """Build a tajweed_detail block referencing the two makhraj rules."""
+    return {
+        "expected_rule": _TJ[expected_rule],
+        "recited_rule":  _TJ[recited_rule],
+        "instruction":   instruction,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 10 – Throat (الحلق) makhraj confusion  (4 tajweed/letter mistakes)
+#
+# All four mistakes involve letters produced from the wrong throat articulation
+# point.  The three throat positions are:
+#   upper_throat (أقصى الحلق) – غ، خ  – deepest, near larynx
+#   middle_throat (وسط الحلق) – ع، ح  – middle of throat
+#   lower_throat  (أدنى الحلق) – ء، ه  – closest to chest
+#
+# Mistakes:
+#   Word  0  (الرَّحْمَٰنُ) – tajweed/letter: ح (middle_throat, pos 4) → ه (lower_throat)  → "الرَّهْمَٰنُ"
+#   Word  1  (عَلَّمَ)      – tajweed/letter: ع (middle_throat, pos 0) → غ (upper_throat)  → "غَلَّمَ"
+#   Word  9  (بِحُسْبَانٍ)  – tajweed/letter: ح (middle_throat, pos 2) → خ (upper_throat)  → "بِخُسْبَانٍ"
+#   Word 15  (وَوَضَعَ)     – tajweed/letter: ع (middle_throat, pos 6) → ه (lower_throat)  → "وَوَضَهَ"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# word 0 · الرَّحْمَٰنُ  → "الرَّهْمَٰنُ"  (ح pos 4 → ه)
+# letters: ["ا","ل","ر","َّ","ح","ْ","م","َ","ٰ","ن","ُ"]
+_LF_W0_LETTER_C10 = [
+    {"position": 0,  "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 1,  "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 2,  "expected_letter": "ر",  "recited_letter": "ر",  "status": "correct"},
+    {"position": 3,  "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4,  "expected_letter": "ح",  "recited_letter": "ه",  "status": "letter_error",
+     "tajweed_detail": _tj(
+         "middle_throat", "lower_throat",
+         "ح must emerge from the middle throat with strong friction (حلقي). "
+         "Pushing it towards the chest produces ه instead — keep the constriction higher in the throat."
+     )},
+    {"position": 5,  "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
+    {"position": 6,  "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 7,  "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 8,  "expected_letter": "ٰ",  "recited_letter": "ٰ",  "status": "correct"},
+    {"position": 9,  "expected_letter": "ن",  "recited_letter": "ن",  "status": "correct"},
+    {"position": 10, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# word 1 · عَلَّمَ  → "غَلَّمَ"  (ع pos 0 → غ)
+# letters: ["ع","َ","ل","َّ","م","َ"]
+_LF_W1_LETTER_C10 = [
+    {"position": 0, "expected_letter": "ع", "recited_letter": "غ", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "middle_throat", "upper_throat",
+         "ع (ʿayn) originates from the middle of the throat with voiced constriction. "
+         "Over-retracting the tongue root produces غ (ghain) from the deep throat instead — "
+         "reduce the depth of the constriction."
+     )},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 5, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+]
+
+# word 9 · بِحُسْبَانٍ  → "بِخُسْبَانٍ"  (ح pos 2 → خ)
+# letters: ["ب","ِ","ح","ُ","س","ْ","ب","َ","ا","ن","ٍ"]
+_LF_W9_LETTER_C10 = [
+    {"position": 0,  "expected_letter": "ب", "recited_letter": "ب", "status": "correct"},
+    {"position": 1,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+    {"position": 2,  "expected_letter": "ح", "recited_letter": "خ", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "middle_throat", "upper_throat",
+         "ح is a voiceless pharyngeal fricative articulated in the middle of the throat. "
+         "Retracting too far back produces خ from the deep throat — "
+         "keep the friction at mid-throat level without velarisation."
+     )},
+    {"position": 3,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+    {"position": 4,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
+    {"position": 5,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 6,  "expected_letter": "ب", "recited_letter": "ب", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "ٍ", "recited_letter": "ٍ", "status": "correct"},
+]
+
+# word 15 · وَوَضَعَ  → "وَوَضَهَ"  (ع pos 6 → ه)
+# letters: ["و","َ","و","َ","ض","َ","ع","َ"]
+_LF_W15_LETTER_C10 = [
+    {"position": 0, "expected_letter": "و", "recited_letter": "و", "status": "correct"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2, "expected_letter": "و", "recited_letter": "و", "status": "correct"},
+    {"position": 3, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 4, "expected_letter": "ض", "recited_letter": "ض", "status": "correct"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 6, "expected_letter": "ع", "recited_letter": "ه", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "middle_throat", "lower_throat",
+         "ع requires voiced constriction in the middle of the throat. "
+         "Relaxing the throat completely produces ه (a glottal/low-throat sound) — "
+         "maintain active pharyngeal narrowing for ع."
+     )},
+    {"position": 7, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+_C10_STATUS = {
+    "type": "status", "verse_id": "55:1-8",
+    "message": "Session started. Ready to receive audio.",
+    "total_words": 21, "total_ayahs": 8,
+}
+
+_C10_ERR = {0: "الرَّهْمَٰنُ", 1: "غَلَّمَ", 9: "بِخُسْبَانٍ", 15: "وَوَضَهَ"}
+
+_C10_OVR = {
+    0:  ("letter_error", _C10_ERR[0],  _LF_W0_LETTER_C10),
+    1:  ("letter_error", _C10_ERR[1],  _LF_W1_LETTER_C10),
+    9:  ("letter_error", _C10_ERR[9],  _LF_W9_LETTER_C10),
+    15: ("letter_error", _C10_ERR[15], _LF_W15_LETTER_C10),
+}
+
+_M10_L1 = {
+    "word_id": "55:1:1", "word_text": "الرَّحْمَٰنُ", "word_position": 0,
+    "type": "letter_error", "recited_text": _C10_ERR[0],
+    "details": "ح (middle_throat) recited as ه (lower_throat) — throat too relaxed/low",
+    "letter_feedback": _LF_W0_LETTER_C10,
+    "tajweed_detail": _tj(
+        "middle_throat", "lower_throat",
+        "ح must be articulated from the middle of the throat (وسط الحلق). "
+        "Dropping to the lower throat produces ه. Tighten the pharyngeal constriction."
+    ),
+}
+_M10_L2 = {
+    "word_id": "55:2:1", "word_text": "عَلَّمَ", "word_position": 1,
+    "type": "letter_error", "recited_text": _C10_ERR[1],
+    "details": "ع (middle_throat) recited as غ (upper_throat) — too deep in the throat",
+    "letter_feedback": _LF_W1_LETTER_C10,
+    "tajweed_detail": _tj(
+        "middle_throat", "upper_throat",
+        "ع (ʿayn) is a voiced pharyngeal fricative from the middle throat (وسط الحلق). "
+        "Retracting too far back yields غ from the upper throat (أقصى الحلق). "
+        "Bring the constriction forward."
+    ),
+}
+_M10_L3 = {
+    "word_id": "55:5:3", "word_text": "بِحُسْبَانٍ", "word_position": 9,
+    "type": "letter_error", "recited_text": _C10_ERR[9],
+    "details": "ح (middle_throat) recited as خ (upper_throat) — velarised/too deep",
+    "letter_feedback": _LF_W9_LETTER_C10,
+    "tajweed_detail": _tj(
+        "middle_throat", "upper_throat",
+        "ح is a voiceless pharyngeal fricative (middle throat). "
+        "Adding velarisation or retraction produces خ from the upper throat. "
+        "Keep the sound purely pharyngeal without involving the tongue root."
+    ),
+}
+_M10_L4 = {
+    "word_id": "55:7:3", "word_text": "وَوَضَعَ", "word_position": 15,
+    "type": "letter_error", "recited_text": _C10_ERR[15],
+    "details": "ع (middle_throat) recited as ه (lower_throat) — throat too relaxed",
+    "letter_feedback": _LF_W15_LETTER_C10,
+    "tajweed_detail": _tj(
+        "middle_throat", "lower_throat",
+        "ع requires active voiced constriction in the middle throat (وسط الحلق). "
+        "Without the constriction the sound becomes ه from the lower throat. "
+        "Actively narrow the pharynx when articulating ع."
+    ),
+}
+
+_C10_ALL = [_M10_L1, _M10_L2, _M10_L3, _M10_L4]
+
+
+def _c10_tx(cursor: int) -> str:
+    return " ".join(_C10_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
+
+
+def _c10(ci, cursor, ayah, pos, complete, mistakes):
+    return {
+        "type": "feedback", "chunk_index": ci,
+        "transcribed_text": _c10_tx(cursor),
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C10_OVR), "mistakes": mistakes,
+    }
+
+
+_C10_CHUNKS = [
+    _c10(1,  0,  1, 0.05, True,  [_M10_L1]),
+    _c10(2,  1,  2, 0.10, False, [_M10_L1, _M10_L2]),
+    _c10(3,  2,  2, 0.14, True,  [_M10_L1, _M10_L2]),
+    _c10(4,  3,  3, 0.19, False, [_M10_L1, _M10_L2]),
+    _c10(5,  4,  3, 0.24, True,  [_M10_L1, _M10_L2]),
+    _c10(6,  5,  4, 0.29, False, [_M10_L1, _M10_L2]),
+    _c10(7,  6,  4, 0.33, True,  [_M10_L1, _M10_L2]),
+    _c10(8,  7,  5, 0.38, False, [_M10_L1, _M10_L2]),
+    _c10(9,  8,  5, 0.43, False, [_M10_L1, _M10_L2]),
+    _c10(10, 9,  5, 0.48, True,  [_M10_L1, _M10_L2, _M10_L3]),
+    _c10(11, 10, 6, 0.52, False, [_M10_L1, _M10_L2, _M10_L3]),
+    _c10(12, 11, 6, 0.57, False, [_M10_L1, _M10_L2, _M10_L3]),
+    _c10(13, 12, 6, 0.62, True,  [_M10_L1, _M10_L2, _M10_L3]),
+    _c10(14, 13, 7, 0.67, False, [_M10_L1, _M10_L2, _M10_L3]),
+    _c10(15, 14, 7, 0.71, False, [_M10_L1, _M10_L2, _M10_L3]),
+    _c10(16, 15, 7, 0.76, False, _C10_ALL),
+    _c10(17, 16, 7, 0.81, True,  _C10_ALL),
+    _c10(18, 17, 8, 0.86, False, _C10_ALL),
+    _c10(19, 18, 8, 0.90, False, _C10_ALL),
+    _c10(20, 19, 8, 0.95, False, _C10_ALL),
+    _c10(21, 20, 8, 1.00, True,  _C10_ALL),
+]
+
+_C10_LM, _C10_WM = _split_mistakes(_C10_ALL)
+
+_C10_SUMMARY = {
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
+    "full_transcription": _c10_tx(20),
+    "total_words": 21, "words_correct": 17,
+    "words_diacritic_error": 0, "words_vowel_error": 0,
+    "words_letter_error": 4, "words_incorrect": 0, "words_not_recited": 0,
+    "total_score": 75, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
+    "ayah_scores": [
+        {"ayah": 1, "score": 50,  "words_correct": 0, "words_errors": 1,
+         "note": "الرَّحْمَٰنُ — ح (middle throat) dropped to ه (lower throat)"},
+        {"ayah": 2, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "عَلَّمَ — ع (middle throat) pushed back to غ (upper throat)"},
+        {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 4, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "بِحُسْبَانٍ — ح (middle throat) pushed back to خ (upper throat)"},
+        {"ayah": 6, "score": 100, "words_correct": 3, "words_errors": 0},
+        {"ayah": 7, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "وَوَضَعَ — ع (middle throat) relaxed to ه (lower throat)"},
+        {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
+    ],
+    "letter_mistakes": _C10_LM,
+    "word_mistakes":   _C10_WM,
+    "mistakes":        _C10_ALL,
+    "tajweed_focus":   "middle_throat",
+    "overall_feedback": (
+        "4 throat-articulation (مخرج الحلق) mistakes: "
+        "ح in الرَّحْمَٰنُ and بِحُسْبَانٍ was produced too deep (sounds like ه or خ); "
+        "ع in عَلَّمَ was retracted to غ and in وَوَضَعَ relaxed to ه. "
+        "Practice isolating وسط الحلق (middle-throat) constriction: "
+        "ح is voiceless, ع is voiced — both must stay in the middle zone."
+    ),
+    "recording": _recording(10, 40),
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 11 – Tongue (اللسان) makhraj confusion  (4 tajweed/letter mistakes)
+#
+# All four mistakes involve confusion between tongue-blade (وسط اللسان),
+# sibilant (الأسنان واللسان) and alveolar (طرف اللسان) articulation points.
+#
+# Mistakes:
+#   Word  7  (الشَّمْسُ)   – tajweed/letter: ش (tongue_blade, pos 2) → س (sibilant)  → "السَّمْسُ"
+#   Word 11  (وَالشَّجَرُ) – tajweed/letter: ش (tongue_blade, pos 4) → س (sibilant)  → "وَالسَّجَرُ"
+#   Word 12  (يَسْجُدَانِ) – tajweed/letter: ج (tongue_blade, pos 4) → ز (sibilant)  → "يَسْزُدَانِ"
+#   Word 18  (تَطْغَوْا)   – tajweed/letter: ط (alveolar emphatic, pos 2) → ت (alveolar plain) → "تَتْغَوْا"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# word 7 · الشَّمْسُ  → "السَّمْسُ"  (ش pos 2 → س)
+# letters: ["ا","ل","ش","َّ","م","ْ","س","ُ"]
+_LF_W7_LETTER_C11 = [
+    {"position": 0, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 1, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 2, "expected_letter": "ش",  "recited_letter": "س",  "status": "letter_error",
+     "tajweed_detail": _tj(
+         "tongue_middle", "sibilant",
+         "ش is produced with the middle of the tongue against the middle palate (وسط اللسان), "
+         "creating a wide-channel fricative with a hushing quality. "
+         "Sliding the tongue tip forward to the gum ridge produces the thinner س instead."
+     )},
+    {"position": 3, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 4, "expected_letter": "م",  "recited_letter": "م",  "status": "correct"},
+    {"position": 5, "expected_letter": "ْ",  "recited_letter": "ْ",  "status": "correct"},
+    {"position": 6, "expected_letter": "س",  "recited_letter": "س",  "status": "correct"},
+    {"position": 7, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# word 11 · وَالشَّجَرُ  → "وَالسَّجَرُ"  (ش pos 4 → س)
+# letters: ["و","َ","ا","ل","ش","َّ","ج","َ","ر","ُ"]
+_LF_W11_LETTER_C11 = [
+    {"position": 0, "expected_letter": "و",  "recited_letter": "و",  "status": "correct"},
+    {"position": 1, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 2, "expected_letter": "ا",  "recited_letter": "ا",  "status": "correct"},
+    {"position": 3, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
+    {"position": 4, "expected_letter": "ش",  "recited_letter": "س",  "status": "letter_error",
+     "tajweed_detail": _tj(
+         "tongue_middle", "sibilant",
+         "ش requires the tongue blade (وسط اللسان) raised toward the hard palate, "
+         "producing a wide hushing fricative (شِيشِي quality). "
+         "Flattening the tongue blade and touching the gum ridge narrows the channel, "
+         "yielding س (a dental sibilant) instead."
+     )},
+    {"position": 5, "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
+    {"position": 6, "expected_letter": "ج",  "recited_letter": "ج",  "status": "correct"},
+    {"position": 7, "expected_letter": "َ",  "recited_letter": "َ",  "status": "correct"},
+    {"position": 8, "expected_letter": "ر",  "recited_letter": "ر",  "status": "correct"},
+    {"position": 9, "expected_letter": "ُ",  "recited_letter": "ُ",  "status": "correct"},
+]
+
+# word 12 · يَسْجُدَانِ  → "يَسْزُدَانِ"  (ج pos 4 → ز)
+# letters: ["ي","َ","س","ْ","ج","ُ","د","َ","ا","ن","ِ"]
+_LF_W12_LETTER_C11 = [
+    {"position": 0,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 1,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
+    {"position": 3,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 4,  "expected_letter": "ج", "recited_letter": "ز", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "tongue_middle", "sibilant",
+         "ج is an affricate produced with the tongue blade against the middle palate (وسط اللسان), "
+         "beginning with a stop then releasing into a fricative. "
+         "Skipping the stop phase and using only the tongue tip at the gum ridge "
+         "produces ز (a voiced dental sibilant) instead."
+     )},
+    {"position": 5,  "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+    {"position": 6,  "expected_letter": "د", "recited_letter": "د", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+]
+
+# word 18 · تَطْغَوْا  → "تَتْغَوْا"  (ط pos 2 → ت)
+# letters: ["ت","َ","ط","ْ","غ","َ","و","ْ","ا"]
+_LF_W18_LETTER_C11 = [
+    {"position": 0, "expected_letter": "ت", "recited_letter": "ت", "status": "correct"},
+    {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 2, "expected_letter": "ط", "recited_letter": "ت", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "alveolar", "alveolar",
+         "Both ط and ت share the alveolar makhraj (طرف اللسان against the gum ridge), "
+         "but ط carries tafkheem (emphasis/velarisation) — the tongue body raises toward "
+         "the soft palate and the sound is 'heavy'. "
+         "Reciting ط without tafkheem produces the plain, 'light' ت instead."
+     )},
+    {"position": 3, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 4, "expected_letter": "غ", "recited_letter": "غ", "status": "correct"},
+    {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 6, "expected_letter": "و", "recited_letter": "و", "status": "correct"},
+    {"position": 7, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 8, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+]
+
+_C11_STATUS = {
+    "type": "status", "verse_id": "55:1-8",
+    "message": "Session started. Ready to receive audio.",
+    "total_words": 21, "total_ayahs": 8,
+}
+
+_C11_ERR = {
+    7:  "السَّمْسُ",
+    11: "وَالسَّجَرُ",
+    12: "يَسْزُدَانِ",
+    18: "تَتْغَوْا",
+}
+
+_C11_OVR = {
+    7:  ("letter_error", _C11_ERR[7],  _LF_W7_LETTER_C11),
+    11: ("letter_error", _C11_ERR[11], _LF_W11_LETTER_C11),
+    12: ("letter_error", _C11_ERR[12], _LF_W12_LETTER_C11),
+    18: ("letter_error", _C11_ERR[18], _LF_W18_LETTER_C11),
+}
+
+_M11_L1 = {
+    "word_id": "55:5:1", "word_text": "الشَّمْسُ", "word_position": 7,
+    "type": "letter_error", "recited_text": _C11_ERR[7],
+    "details": "ش (tongue_blade/وسط اللسان) recited as س (sibilant) — tongue moved to gum ridge",
+    "letter_feedback": _LF_W7_LETTER_C11,
+    "tajweed_detail": _tj(
+        "tongue_middle", "sibilant",
+        "ش needs the tongue blade arched against the hard palate (وسط اللسان). "
+        "Bring the middle of the tongue up — not just the tip — to produce the hushing ش."
+    ),
+}
+_M11_L2 = {
+    "word_id": "55:6:2", "word_text": "وَالشَّجَرُ", "word_position": 11,
+    "type": "letter_error", "recited_text": _C11_ERR[11],
+    "details": "ش (tongue_blade) recited as س (sibilant) — same tongue-position error as الشَّمْسُ",
+    "letter_feedback": _LF_W11_LETTER_C11,
+    "tajweed_detail": _tj(
+        "tongue_middle", "sibilant",
+        "Recurring error: ش requires tongue blade against the middle palate. "
+        "Focus on raising the mid-tongue rather than pointing the tongue tip for this letter."
+    ),
+}
+_M11_L3 = {
+    "word_id": "55:6:3", "word_text": "يَسْجُدَانِ", "word_position": 12,
+    "type": "letter_error", "recited_text": _C11_ERR[12],
+    "details": "ج (tongue_blade affricate) recited as ز (sibilant) — stop phase omitted",
+    "letter_feedback": _LF_W12_LETTER_C11,
+    "tajweed_detail": _tj(
+        "tongue_middle", "sibilant",
+        "ج is a palatal affricate (stop + fricative) from وسط اللسان. "
+        "Complete the initial closure of the tongue blade against the palate before "
+        "releasing into the fricative — do not skip to a simple ز buzz."
+    ),
+}
+_M11_L4 = {
+    "word_id": "55:8:2", "word_text": "تَطْغَوْا", "word_position": 18,
+    "type": "letter_error", "recited_text": _C11_ERR[18],
+    "details": "ط (alveolar emphatic) recited as ت (alveolar plain) — tafkheem missing",
+    "letter_feedback": _LF_W18_LETTER_C11,
+    "tajweed_detail": _tj(
+        "alveolar", "alveolar",
+        "ط shares the alveolar makhraj with ت but carries tafkheem (تفخيم) — "
+        "the tongue body must raise toward the soft palate to 'thicken' the sound. "
+        "Practice saying ط with a noticeably 'heavy' quality compared to the light ت."
+    ),
+}
+
+_C11_ALL = [_M11_L1, _M11_L2, _M11_L3, _M11_L4]
+
+
+def _c11_tx(cursor: int) -> str:
+    return " ".join(_C11_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
+
+
+def _c11(ci, cursor, ayah, pos, complete, mistakes):
+    return {
+        "type": "feedback", "chunk_index": ci,
+        "transcribed_text": _c11_tx(cursor),
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C11_OVR), "mistakes": mistakes,
+    }
+
+
+_C11_CHUNKS = [
+    _c11(1,  0,  1, 0.05, True,  []),
+    _c11(2,  1,  2, 0.10, False, []),
+    _c11(3,  2,  2, 0.14, True,  []),
+    _c11(4,  3,  3, 0.19, False, []),
+    _c11(5,  4,  3, 0.24, True,  []),
+    _c11(6,  5,  4, 0.29, False, []),
+    _c11(7,  6,  4, 0.33, True,  []),
+    _c11(8,  7,  5, 0.38, False, [_M11_L1]),
+    _c11(9,  8,  5, 0.43, False, [_M11_L1]),
+    _c11(10, 9,  5, 0.48, True,  [_M11_L1]),
+    _c11(11, 10, 6, 0.52, False, [_M11_L1]),
+    _c11(12, 11, 6, 0.57, False, [_M11_L1, _M11_L2]),
+    _c11(13, 12, 6, 0.62, True,  [_M11_L1, _M11_L2, _M11_L3]),
+    _c11(14, 13, 7, 0.67, False, [_M11_L1, _M11_L2, _M11_L3]),
+    _c11(15, 14, 7, 0.71, False, [_M11_L1, _M11_L2, _M11_L3]),
+    _c11(16, 15, 7, 0.76, False, [_M11_L1, _M11_L2, _M11_L3]),
+    _c11(17, 16, 7, 0.81, True,  [_M11_L1, _M11_L2, _M11_L3]),
+    _c11(18, 17, 8, 0.86, False, [_M11_L1, _M11_L2, _M11_L3]),
+    _c11(19, 18, 8, 0.90, False, _C11_ALL),
+    _c11(20, 19, 8, 0.95, False, _C11_ALL),
+    _c11(21, 20, 8, 1.00, True,  _C11_ALL),
+]
+
+_C11_LM, _C11_WM = _split_mistakes(_C11_ALL)
+
+_C11_SUMMARY = {
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
+    "full_transcription": _c11_tx(20),
+    "total_words": 21, "words_correct": 17,
+    "words_diacritic_error": 0, "words_vowel_error": 0,
+    "words_letter_error": 4, "words_incorrect": 0, "words_not_recited": 0,
+    "total_score": 75, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
+    "ayah_scores": [
+        {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
+        {"ayah": 2, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 3, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 4, "score": 100, "words_correct": 2, "words_errors": 0},
+        {"ayah": 5, "score": 67,  "words_correct": 2, "words_errors": 1,
+         "note": "الشَّمْسُ — ش (tongue blade) flattened to س (sibilant)"},
+        {"ayah": 6, "score": 67,  "words_correct": 1, "words_errors": 2,
+         "note": "وَالشَّجَرُ: ش→س; يَسْجُدَانِ: ج (affricate) reduced to ز"},
+        {"ayah": 7, "score": 100, "words_correct": 4, "words_errors": 0},
+        {"ayah": 8, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "تَطْغَوْا — ط recited without tafkheem, sounds like ت"},
+    ],
+    "letter_mistakes": _C11_LM,
+    "word_mistakes":   _C11_WM,
+    "mistakes":        _C11_ALL,
+    "tajweed_focus":   "tongue_middle",
+    "overall_feedback": (
+        "4 tongue-makhraj (مخرج اللسان) mistakes: "
+        "ش in الشَّمْسُ and وَالشَّجَرُ was produced at the gum ridge (like س) instead of "
+        "the middle palate (وسط اللسان); "
+        "ج in يَسْجُدَانِ was reduced to ز by omitting the stop phase; "
+        "ط in تَطْغَوْا was recited without tafkheem (emphasis), sounding like ت. "
+        "Drill tongue-blade elevation for ش/ج and heavy-tongue posture for ط."
+    ),
+    "recording": _recording(11, 40),
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 12 – Mixed makhraj: velar + nasal + lips + sibilant  (4 tajweed/letter mistakes)
+#
+# Mistakes spanning four different articulation zones:
+#   Word  2  (الْقُرْآنَ)  – tajweed/letter: ق (velar, pos 3) → ك (velar-front) → "الْكُرْآنَ"
+#   Word  4  (الْإِنسَانَ) – tajweed/letter: ن (nasal, pos 5) → ل (lateral)     → "الْإِلسَانَ"
+#   Word  6  (الْبَيَانَ)  – tajweed/letter: ب (lips, pos 3)  → م (nasal-lips)  → "الْمَيَانَ"
+#   Word 16  (الْمِيزَانَ) – tajweed/letter: ز (sibilant voiced, pos 6) → س (sibilant unvoiced) → "الْمِيسَانَ"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# word 2 · الْقُرْآنَ  → "الْكُرْآنَ"  (ق pos 3 → ك)
+# letters: ["ا","ل","ْ","ق","ُ","ر","ْ","آ","ن","َ"]
+_LF_W2_LETTER_C12 = [
+    {"position": 0, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3, "expected_letter": "ق", "recited_letter": "ك", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "velar", "velar",
+         "Both ق and ك are velar (أقصى اللسان) stops, but ق is articulated further back — "
+         "the very back of the tongue presses against the soft palate to produce a deeper, "
+         "emphatic (مفخم) quality. "
+         "ك is made slightly forward of ق. Pull the tongue root further back for ق."
+     )},
+    {"position": 4, "expected_letter": "ُ", "recited_letter": "ُ", "status": "correct"},
+    {"position": 5, "expected_letter": "ر", "recited_letter": "ر", "status": "correct"},
+    {"position": 6, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 7, "expected_letter": "آ", "recited_letter": "آ", "status": "correct"},
+    {"position": 8, "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 9, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# word 4 · الْإِنسَانَ  → "الْإِلسَانَ"  (ن pos 5 → ل)
+# letters: ["ا","ل","ْ","إ","ِ","ن","س","َ","ا","ن","َ"]
+_LF_W4_LETTER_C12 = [
+    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3,  "expected_letter": "إ", "recited_letter": "إ", "status": "correct"},
+    {"position": 4,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+    {"position": 5,  "expected_letter": "ن", "recited_letter": "ل", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "nasal", "lateral",
+         "ن (nūn) is a nasal stop: the tongue tip touches the gum ridge while air flows "
+         "through the nasal cavity (الخيشوم), producing resonance in the nose. "
+         "ل (lām) is a lateral: the tongue tip also touches the gum ridge but the velum "
+         "is raised, blocking nasal airflow and diverting it over the tongue sides. "
+         "Allow the velum to lower and the nasal cavity to resonate for ن."
+     )},
+    {"position": 6,  "expected_letter": "س", "recited_letter": "س", "status": "correct"},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# word 6 · الْبَيَانَ  → "الْمَيَانَ"  (ب pos 3 → م)
+# letters: ["ا","ل","ْ","ب","َ","ي","َ","ا","ن","َ"]
+_LF_W6_LETTER_C12 = [
+    {"position": 0, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1, "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3, "expected_letter": "ب", "recited_letter": "م", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "lips", "nasal",
+         "Both ب and م are bilabial (الشفتان) stops formed by pressing the lips together. "
+         "The difference is the velum: for ب the velum is raised (oral stop, no nasality); "
+         "for م the velum is lowered so air flows through the nose (الخيشوم), giving it a hum. "
+         "Close the nose resonance to get the crisp ب instead of the nasal م."
+     )},
+    {"position": 4, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 5, "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 6, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 7, "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 8, "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 9, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+# word 16 · الْمِيزَانَ  → "الْمِيسَانَ"  (ز pos 6 → س)
+# letters: ["ا","ل","ْ","م","ِ","ي","ز","َ","ا","ن","َ"]
+_LF_W16_LETTER_C12 = [
+    {"position": 0,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 1,  "expected_letter": "ل", "recited_letter": "ل", "status": "correct"},
+    {"position": 2,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
+    {"position": 3,  "expected_letter": "م", "recited_letter": "م", "status": "correct"},
+    {"position": 4,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
+    {"position": 5,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
+    {"position": 6,  "expected_letter": "ز", "recited_letter": "س", "status": "letter_error",
+     "tajweed_detail": _tj(
+         "sibilant", "sibilant",
+         "Both ز and س are sibilant sounds (الأسنان واللسان) with the same tongue position, "
+         "but ز is voiced (the vocal cords vibrate — feel the buzz in the throat) while "
+         "س is voiceless (vocal cords do not vibrate). "
+         "Switch on the vocal cords to turn the hissing س into the buzzing ز."
+     )},
+    {"position": 7,  "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+    {"position": 8,  "expected_letter": "ا", "recited_letter": "ا", "status": "correct"},
+    {"position": 9,  "expected_letter": "ن", "recited_letter": "ن", "status": "correct"},
+    {"position": 10, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
+]
+
+_C12_STATUS = {
+    "type": "status", "verse_id": "55:1-8",
+    "message": "Session started. Ready to receive audio.",
+    "total_words": 21, "total_ayahs": 8,
+}
+
+_C12_ERR = {
+    2:  "الْكُرْآنَ",
+    4:  "الْإِلسَانَ",
+    6:  "الْمَيَانَ",
+    16: "الْمِيسَانَ",
+}
+
+_C12_OVR = {
+    2:  ("letter_error", _C12_ERR[2],  _LF_W2_LETTER_C12),
+    4:  ("letter_error", _C12_ERR[4],  _LF_W4_LETTER_C12),
+    6:  ("letter_error", _C12_ERR[6],  _LF_W6_LETTER_C12),
+    16: ("letter_error", _C12_ERR[16], _LF_W16_LETTER_C12),
+}
+
+_M12_L1 = {
+    "word_id": "55:2:2", "word_text": "الْقُرْآنَ", "word_position": 2,
+    "type": "letter_error", "recited_text": _C12_ERR[2],
+    "details": "ق (velar, back) recited as ك (velar, front) — tongue not far enough back",
+    "letter_feedback": _LF_W2_LETTER_C12,
+    "tajweed_detail": _tj(
+        "velar", "velar",
+        "ق needs the tongue root pressed against the very back of the soft palate (أقصى اللسان). "
+        "Move the contact point further back to produce the deeper, emphatic ق — "
+        "not the lighter ك which is slightly more forward."
+    ),
+}
+_M12_L2 = {
+    "word_id": "55:3:2", "word_text": "الْإِنسَانَ", "word_position": 4,
+    "type": "letter_error", "recited_text": _C12_ERR[4],
+    "details": "ن (nasal resonance) recited as ل (lateral) — nasal cavity not engaged",
+    "letter_feedback": _LF_W4_LETTER_C12,
+    "tajweed_detail": _tj(
+        "nasal", "lateral",
+        "ن requires nasal resonance (الخيشوم) — lower the velum to let air pass through the nose. "
+        "If the velum stays raised the nasal quality disappears, "
+        "and the sound becomes ل (a lateral with airflow over the tongue sides)."
+    ),
+}
+_M12_L3 = {
+    "word_id": "55:4:2", "word_text": "الْبَيَانَ", "word_position": 6,
+    "type": "letter_error", "recited_text": _C12_ERR[6],
+    "details": "ب (oral bilabial) recited as م (nasal bilabial) — nose not properly closed off",
+    "letter_feedback": _LF_W6_LETTER_C12,
+    "tajweed_detail": _tj(
+        "lips", "nasal",
+        "ب and م both seal the lips (الشفتان), but ب releases without nasal resonance. "
+        "Raise the soft palate (velum) to block the nasal cavity — "
+        "the burst of air should exit only through the mouth."
+    ),
+}
+_M12_L4 = {
+    "word_id": "55:7:4", "word_text": "الْمِيزَانَ", "word_position": 16,
+    "type": "letter_error", "recited_text": _C12_ERR[16],
+    "details": "ز (voiced sibilant) recited as س (unvoiced sibilant) — vocal cords not vibrating",
+    "letter_feedback": _LF_W16_LETTER_C12,
+    "tajweed_detail": _tj(
+        "sibilant", "sibilant",
+        "ز and س share the same tongue-tip-to-gum-ridge position (الأسنان واللسان). "
+        "The only difference is voicing: activate the vocal cords for ز. "
+        "Place fingers lightly on the larynx — you should feel vibration for ز but not for س."
+    ),
+}
+
+_C12_ALL = [_M12_L1, _M12_L2, _M12_L3, _M12_L4]
+
+
+def _c12_tx(cursor: int) -> str:
+    return " ".join(_C12_ERR.get(i, WORDS[i]["text"]) for i in range(cursor + 1))
+
+
+def _c12(ci, cursor, ayah, pos, complete, mistakes):
+    return {
+        "type": "feedback", "chunk_index": ci,
+        "transcribed_text": _c12_tx(cursor),
+        "current_ayah": ayah, "word_cursor": cursor,
+        "position_in_verse": pos, "ayah_complete": complete,
+        "skipped_ayahs": [], "repeated_ayahs": [],
+        "word_feedback": _wf(cursor, _C12_OVR), "mistakes": mistakes,
+    }
+
+
+_C12_CHUNKS = [
+    _c12(1,  0,  1, 0.05, True,  []),
+    _c12(2,  1,  2, 0.10, False, []),
+    _c12(3,  2,  2, 0.14, True,  [_M12_L1]),
+    _c12(4,  3,  3, 0.19, False, [_M12_L1]),
+    _c12(5,  4,  3, 0.24, True,  [_M12_L1, _M12_L2]),
+    _c12(6,  5,  4, 0.29, False, [_M12_L1, _M12_L2]),
+    _c12(7,  6,  4, 0.33, True,  [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(8,  7,  5, 0.38, False, [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(9,  8,  5, 0.43, False, [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(10, 9,  5, 0.48, True,  [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(11, 10, 6, 0.52, False, [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(12, 11, 6, 0.57, False, [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(13, 12, 6, 0.62, True,  [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(14, 13, 7, 0.67, False, [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(15, 14, 7, 0.71, False, [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(16, 15, 7, 0.76, False, [_M12_L1, _M12_L2, _M12_L3]),
+    _c12(17, 16, 7, 0.81, True,  _C12_ALL),
+    _c12(18, 17, 8, 0.86, False, _C12_ALL),
+    _c12(19, 18, 8, 0.90, False, _C12_ALL),
+    _c12(20, 19, 8, 0.95, False, _C12_ALL),
+    _c12(21, 20, 8, 1.00, True,  _C12_ALL),
+]
+
+_C12_LM, _C12_WM = _split_mistakes(_C12_ALL)
+
+_C12_SUMMARY = {
+    "type": "session_summary", "verse_id": "55:1-8",
+    "total_chunks": 21, "duration_seconds": 40,
+    "full_transcription": _c12_tx(20),
+    "total_words": 21, "words_correct": 17,
+    "words_diacritic_error": 0, "words_vowel_error": 0,
+    "words_letter_error": 4, "words_incorrect": 0, "words_not_recited": 0,
+    "total_score": 75, "completion_percentage": 100,
+    "skipped_ayahs": [], "repeated_ayahs": [],
+    "skip_detail": [], "repetition_detail": [],
+    "ayah_scores": [
+        {"ayah": 1, "score": 100, "words_correct": 1, "words_errors": 0},
+        {"ayah": 2, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "الْقُرْآنَ — ق (back-velar) recited as ك (front-velar)"},
+        {"ayah": 3, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "الْإِنسَانَ — ن (nasal) recited without nasal resonance, sounds like ل"},
+        {"ayah": 4, "score": 50,  "words_correct": 1, "words_errors": 1,
+         "note": "الْبَيَانَ — ب (oral bilabial) nasalised to م"},
+        {"ayah": 5, "score": 100, "words_correct": 3, "words_errors": 0},
+        {"ayah": 6, "score": 100, "words_correct": 3, "words_errors": 0},
+        {"ayah": 7, "score": 75,  "words_correct": 3, "words_errors": 1,
+         "note": "الْمِيزَانَ — ز (voiced sibilant) recited as unvoiced س"},
+        {"ayah": 8, "score": 100, "words_correct": 4, "words_errors": 0},
+    ],
+    "letter_mistakes": _C12_LM,
+    "word_mistakes":   _C12_WM,
+    "mistakes":        _C12_ALL,
+    "tajweed_focus":   "mixed_makhraj",
+    "overall_feedback": (
+        "4 makhraj mistakes across different articulation zones: "
+        "ق in الْقُرْآنَ was too front (sounded like ك — push tongue further back); "
+        "ن in الْإِنسَانَ lost nasal resonance (sounds like ل — engage the nasal cavity); "
+        "ب in الْبَيَانَ was nasalised (sounds like م — close off nasal airflow); "
+        "ز in الْمِيزَانَ was devoiced (sounds like س — activate vocal cords). "
+        "Each mistake represents a different makhraj or sifa (صفة) error — "
+        "use a mirror and hand-on-larynx drills for each letter pair."
+    ),
+    "recording": _recording(12, 40),
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
 CASE_DATA = {
-    1: {"status": _C1_STATUS, "chunks": _C1_CHUNKS, "summary": _C1_SUMMARY},
-    2: {"status": _C2_STATUS, "chunks": _C2_CHUNKS, "summary": _C2_SUMMARY},
-    3: {"status": _C3_STATUS, "chunks": _C3_CHUNKS, "summary": _C3_SUMMARY},
-    4: {"status": _C4_STATUS, "chunks": _C4_CHUNKS, "summary": _C4_SUMMARY},
-    5: {"status": _C5_STATUS, "chunks": _C5_CHUNKS, "summary": _C5_SUMMARY},
-    6: {"status": _C6_STATUS, "chunks": _C6_CHUNKS, "summary": _C6_SUMMARY},
-    7: {"status": _C7_STATUS, "chunks": _C7_CHUNKS, "summary": _C7_SUMMARY},
-    8: {"status": _C8_STATUS, "chunks": _C8_CHUNKS, "summary": _C8_SUMMARY},
-    9: {"status": _C9_STATUS, "chunks": _C9_CHUNKS, "summary": _C9_SUMMARY},
+    1:  {"status": _C1_STATUS,  "chunks": _C1_CHUNKS,  "summary": _C1_SUMMARY},
+    2:  {"status": _C2_STATUS,  "chunks": _C2_CHUNKS,  "summary": _C2_SUMMARY},
+    3:  {"status": _C3_STATUS,  "chunks": _C3_CHUNKS,  "summary": _C3_SUMMARY},
+    4:  {"status": _C4_STATUS,  "chunks": _C4_CHUNKS,  "summary": _C4_SUMMARY},
+    5:  {"status": _C5_STATUS,  "chunks": _C5_CHUNKS,  "summary": _C5_SUMMARY},
+    6:  {"status": _C6_STATUS,  "chunks": _C6_CHUNKS,  "summary": _C6_SUMMARY},
+    7:  {"status": _C7_STATUS,  "chunks": _C7_CHUNKS,  "summary": _C7_SUMMARY},
+    8:  {"status": _C8_STATUS,  "chunks": _C8_CHUNKS,  "summary": _C8_SUMMARY},
+    9:  {"status": _C9_STATUS,  "chunks": _C9_CHUNKS,  "summary": _C9_SUMMARY},
+    10: {"status": _C10_STATUS, "chunks": _C10_CHUNKS, "summary": _C10_SUMMARY},
+    11: {"status": _C11_STATUS, "chunks": _C11_CHUNKS, "summary": _C11_SUMMARY},
+    12: {"status": _C12_STATUS, "chunks": _C12_CHUNKS, "summary": _C12_SUMMARY},
 }

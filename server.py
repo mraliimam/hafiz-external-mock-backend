@@ -1,13 +1,13 @@
 """
 Hafiz Mock Backend Server
 =========================
-Mimics the real backend API so frontend developers can test all 5
+Mimics the real backend API so frontend developers can test all 12
 use-case scenarios without a live ML pipeline.
 
 REST
 ----
   GET  http://localhost:8000/api/verses                      → verse list
-  GET  http://localhost:8000/api/recordings/{use_case}       → download static mock WAV (1–5)
+  GET  http://localhost:8000/api/recordings/{use_case}       → download static mock WAV (1–12)
   GET  http://localhost:8000/api/session-recordings/{id}     → download the actual audio
                                                                captured during a session
 
@@ -19,6 +19,8 @@ Flow
 ----
   1. Frontend opens WS connection.
   2. Frontend sends   { "type": "start", "verse_id": "55:1-8", "use_case": 1 }
+
+     Harakat / letter / word-level mistake cases (1–9):
      • use_case  1 = mixed: 1 vowel + 1 letter + 1 diacritic + 1 incorrect  (4 mistakes)
      • use_case  2 = repeat ayah 1 + 1 diacritic + 1 vowel error             (2 mistakes)
      • use_case  3 = skip ayah 2 + 1 diacritic + 1 letter error              (2 mistakes)
@@ -29,14 +31,20 @@ Flow
      • use_case  8 = severe: 2 incr + 2 letter + 2 diac + 1 vowel            (7 mistakes)
      • use_case  9 = extreme: 1 incr + 3 letter + 2 diac + 2 vowel           (8 mistakes)
 
-     Each session_summary contains:
-       • "letter_mistakes" – diacritic/vowel/letter errors with word_position + letter_feedback
-       • "word_mistakes"   – incorrect words with word_position reference
-       • "mistakes"        – flat combined list (backward-compat)
+     Tajweed / pronunciation (makhraj) cases (10–12):
+     • use_case 10 = tajweed – throat (الحلق) makhraj confusion               (4 mistakes)
+                     ح/ع confused between upper_throat, middle_throat, lower_throat
+     • use_case 11 = tajweed – tongue (اللسان) makhraj + tafkheem             (4 mistakes)
+                     ش/ج confused with sibilant; ط recited without tafkheem as ت
+     • use_case 12 = tajweed – mixed makhraj: velar/nasal/lips/sibilant        (4 mistakes)
+                     ق→ك, ن→ل, ب→م, ز→س — each from a different articulation zone
+
   3. Server replies with a  status  message.
+
   4. Frontend sends  { "type": "audio", "audio": "<base64>" }  (one per ~2-second chunk).
      • The server accumulates the raw audio bytes from every chunk.
      • It also sends the next pre-built feedback message from the mock sequence.
+
   5. Frontend sends  { "type": "stop" }.
      • Server flushes remaining feedback chunks.
      • All accumulated audio bytes are concatenated and stored in memory.
@@ -45,6 +53,28 @@ Flow
      • recording.source = "recorded" | "mock"
      • recording.download_url = /api/session-recordings/{session_id}  (real audio)
                               or /api/recordings/{use_case}           (mock WAV)
+
+session_summary fields
+----------------------
+  • "letter_mistakes"  – diacritic/vowel/letter errors with word_position + letter_feedback
+  • "word_mistakes"    – incorrect words with word_position reference
+  • "mistakes"         – flat combined list (backward-compat)
+  • "tajweed_focus"    – present on cases 10–12; primary makhraj category
+                         ("middle_throat" | "tongue_middle" | "mixed_makhraj")
+
+tajweed_detail block  (cases 10–12 only)
+-----------------------------------------
+  Attached to every tajweed letter_error at two levels:
+    • mistake["tajweed_detail"]
+    • mistake["letter_feedback"][n]["tajweed_detail"]  (error position only)
+
+  Both "expected_rule" and "recited_rule" carry the full Tajweed_rule.json schema:
+    id, name, arabicName, description, letters,
+    color (HEX), textColor (HEX), cx, cy, rx, ry
+
+  cx/cy/rx/ry are SVG ellipse coordinates for highlighting articulation zones
+  on the interactive mouth/throat diagram in the frontend.
+  color/textColor are in HEX format (8-digit #RRGGBBAA where alpha < 1).
 """
 
 import asyncio
@@ -234,7 +264,7 @@ async def ws_recitation(websocket: WebSocket):
                 if use_case not in md.CASE_DATA:
                     await websocket.send_json({
                         "type": "error",
-                        "message": f"Unknown use_case '{use_case}'. Valid values: 1–9",
+                        "message": f"Unknown use_case '{use_case}'. Valid values: 1–12",
                     })
                     continue
 
