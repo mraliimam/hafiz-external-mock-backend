@@ -234,7 +234,14 @@ def _txt(indices) -> str:
 
 
 def _split_mistakes(mistakes: List[Dict]):
-    """Return (letter_mistakes, word_mistakes) from a flat list."""
+    """Return (letter_mistakes, word_mistakes) from a flat list.
+
+    Also ensures every mistake carries a 'tajweed_detail' key so the API
+    response is consistent across all cases.  Tajweed cases (10-12) already
+    have the full block; non-tajweed cases (1-9) receive an empty dict.
+    """
+    for m in mistakes:
+        m.setdefault("tajweed_detail", {})
     letter = [m for m in mistakes if m["type"] != "incorrect"]
     word   = [m for m in mistakes if m["type"] == "incorrect"]
     return letter, word
@@ -2304,12 +2311,32 @@ _TJ: Dict[str, Dict] = {
 }
 
 
-def _tj(expected_rule: str, recited_rule: str, instruction: str) -> Dict:
-    """Build a tajweed_detail block referencing the two makhraj rules."""
+def _tj(correct_letter: str, expected_rule: str,
+        wrong_letter: str,   recited_rule: str,
+        instruction: str) -> Dict:
+    """Build a tajweed_detail block with correct/wrong pronunciation + makhraj rules.
+
+    Args:
+        correct_letter: The letter that should be pronounced (correct).
+        expected_rule:  Key into _TJ — the makhraj where correct_letter belongs.
+        wrong_letter:   The letter that was actually recited (mistake).
+        recited_rule:   Key into _TJ — the makhraj actually used.
+        instruction:    Plain-English correction tip for the reciter.
+
+    The returned dict is attached at two levels:
+      • mistake["tajweed_detail"]
+      • mistake["letter_feedback"][n]["tajweed_detail"]  (error position only)
+    """
     return {
-        "expected_rule": _TJ[expected_rule],
-        "recited_rule":  _TJ[recited_rule],
-        "instruction":   instruction,
+        "correct_pronunciation": {
+            "letter": correct_letter,
+            "makhraj": _TJ[expected_rule],
+        },
+        "wrong_pronunciation": {
+            "letter": wrong_letter,
+            "makhraj": _TJ[recited_rule],
+        },
+        "instruction": instruction,
     }
 
 
@@ -2338,7 +2365,7 @@ _LF_W0_LETTER_C10 = [
     {"position": 3,  "expected_letter": "َّ", "recited_letter": "َّ", "status": "correct"},
     {"position": 4,  "expected_letter": "ح",  "recited_letter": "ه",  "status": "letter_error",
      "tajweed_detail": _tj(
-         "middle_throat", "lower_throat",
+         "ح", "middle_throat", "ه", "lower_throat",
          "ح must emerge from the middle throat with strong friction (حلقي). "
          "Pushing it towards the chest produces ه instead — keep the constriction higher in the throat."
      )},
@@ -2355,7 +2382,7 @@ _LF_W0_LETTER_C10 = [
 _LF_W1_LETTER_C10 = [
     {"position": 0, "expected_letter": "ع", "recited_letter": "غ", "status": "letter_error",
      "tajweed_detail": _tj(
-         "middle_throat", "upper_throat",
+         "ع", "middle_throat", "غ", "upper_throat",
          "ع (ʿayn) originates from the middle of the throat with voiced constriction. "
          "Over-retracting the tongue root produces غ (ghain) from the deep throat instead — "
          "reduce the depth of the constriction."
@@ -2374,7 +2401,7 @@ _LF_W9_LETTER_C10 = [
     {"position": 1,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
     {"position": 2,  "expected_letter": "ح", "recited_letter": "خ", "status": "letter_error",
      "tajweed_detail": _tj(
-         "middle_throat", "upper_throat",
+         "ح", "middle_throat", "خ", "upper_throat",
          "ح is a voiceless pharyngeal fricative articulated in the middle of the throat. "
          "Retracting too far back produces خ from the deep throat — "
          "keep the friction at mid-throat level without velarisation."
@@ -2400,7 +2427,7 @@ _LF_W15_LETTER_C10 = [
     {"position": 5, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
     {"position": 6, "expected_letter": "ع", "recited_letter": "ه", "status": "letter_error",
      "tajweed_detail": _tj(
-         "middle_throat", "lower_throat",
+         "ع", "middle_throat", "ه", "lower_throat",
          "ع requires voiced constriction in the middle of the throat. "
          "Relaxing the throat completely produces ه (a glottal/low-throat sound) — "
          "maintain active pharyngeal narrowing for ع."
@@ -2429,7 +2456,7 @@ _M10_L1 = {
     "details": "ح (middle_throat) recited as ه (lower_throat) — throat too relaxed/low",
     "letter_feedback": _LF_W0_LETTER_C10,
     "tajweed_detail": _tj(
-        "middle_throat", "lower_throat",
+        "ح", "middle_throat", "ه", "lower_throat",
         "ح must be articulated from the middle of the throat (وسط الحلق). "
         "Dropping to the lower throat produces ه. Tighten the pharyngeal constriction."
     ),
@@ -2440,7 +2467,7 @@ _M10_L2 = {
     "details": "ع (middle_throat) recited as غ (upper_throat) — too deep in the throat",
     "letter_feedback": _LF_W1_LETTER_C10,
     "tajweed_detail": _tj(
-        "middle_throat", "upper_throat",
+        "ع", "middle_throat", "غ", "upper_throat",
         "ع (ʿayn) is a voiced pharyngeal fricative from the middle throat (وسط الحلق). "
         "Retracting too far back yields غ from the upper throat (أقصى الحلق). "
         "Bring the constriction forward."
@@ -2452,7 +2479,7 @@ _M10_L3 = {
     "details": "ح (middle_throat) recited as خ (upper_throat) — velarised/too deep",
     "letter_feedback": _LF_W9_LETTER_C10,
     "tajweed_detail": _tj(
-        "middle_throat", "upper_throat",
+        "ح", "middle_throat", "خ", "upper_throat",
         "ح is a voiceless pharyngeal fricative (middle throat). "
         "Adding velarisation or retraction produces خ from the upper throat. "
         "Keep the sound purely pharyngeal without involving the tongue root."
@@ -2464,7 +2491,7 @@ _M10_L4 = {
     "details": "ع (middle_throat) recited as ه (lower_throat) — throat too relaxed",
     "letter_feedback": _LF_W15_LETTER_C10,
     "tajweed_detail": _tj(
-        "middle_throat", "lower_throat",
+        "ع", "middle_throat", "ه", "lower_throat",
         "ع requires active voiced constriction in the middle throat (وسط الحلق). "
         "Without the constriction the sound becomes ه from the lower throat. "
         "Actively narrow the pharynx when articulating ع."
@@ -2574,7 +2601,7 @@ _LF_W7_LETTER_C11 = [
     {"position": 1, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
     {"position": 2, "expected_letter": "ش",  "recited_letter": "س",  "status": "letter_error",
      "tajweed_detail": _tj(
-         "tongue_middle", "sibilant",
+         "ش", "tongue_middle", "س", "sibilant",
          "ش is produced with the middle of the tongue against the middle palate (وسط اللسان), "
          "creating a wide-channel fricative with a hushing quality. "
          "Sliding the tongue tip forward to the gum ridge produces the thinner س instead."
@@ -2595,7 +2622,7 @@ _LF_W11_LETTER_C11 = [
     {"position": 3, "expected_letter": "ل",  "recited_letter": "ل",  "status": "correct"},
     {"position": 4, "expected_letter": "ش",  "recited_letter": "س",  "status": "letter_error",
      "tajweed_detail": _tj(
-         "tongue_middle", "sibilant",
+         "ش", "tongue_middle", "س", "sibilant",
          "ش requires the tongue blade (وسط اللسان) raised toward the hard palate, "
          "producing a wide hushing fricative (شِيشِي quality). "
          "Flattening the tongue blade and touching the gum ridge narrows the channel, "
@@ -2617,7 +2644,7 @@ _LF_W12_LETTER_C11 = [
     {"position": 3,  "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
     {"position": 4,  "expected_letter": "ج", "recited_letter": "ز", "status": "letter_error",
      "tajweed_detail": _tj(
-         "tongue_middle", "sibilant",
+         "ج", "tongue_middle", "ز", "sibilant",
          "ج is an affricate produced with the tongue blade against the middle palate (وسط اللسان), "
          "beginning with a stop then releasing into a fricative. "
          "Skipping the stop phase and using only the tongue tip at the gum ridge "
@@ -2638,7 +2665,7 @@ _LF_W18_LETTER_C11 = [
     {"position": 1, "expected_letter": "َ", "recited_letter": "َ", "status": "correct"},
     {"position": 2, "expected_letter": "ط", "recited_letter": "ت", "status": "letter_error",
      "tajweed_detail": _tj(
-         "alveolar", "alveolar",
+         "ط", "alveolar", "ت", "alveolar",
          "Both ط and ت share the alveolar makhraj (طرف اللسان against the gum ridge), "
          "but ط carries tafkheem (emphasis/velarisation) — the tongue body raises toward "
          "the soft palate and the sound is 'heavy'. "
@@ -2678,7 +2705,7 @@ _M11_L1 = {
     "details": "ش (tongue_blade/وسط اللسان) recited as س (sibilant) — tongue moved to gum ridge",
     "letter_feedback": _LF_W7_LETTER_C11,
     "tajweed_detail": _tj(
-        "tongue_middle", "sibilant",
+        "ش", "tongue_middle", "س", "sibilant",
         "ش needs the tongue blade arched against the hard palate (وسط اللسان). "
         "Bring the middle of the tongue up — not just the tip — to produce the hushing ش."
     ),
@@ -2689,7 +2716,7 @@ _M11_L2 = {
     "details": "ش (tongue_blade) recited as س (sibilant) — same tongue-position error as الشَّمْسُ",
     "letter_feedback": _LF_W11_LETTER_C11,
     "tajweed_detail": _tj(
-        "tongue_middle", "sibilant",
+        "ش", "tongue_middle", "س", "sibilant",
         "Recurring error: ش requires tongue blade against the middle palate. "
         "Focus on raising the mid-tongue rather than pointing the tongue tip for this letter."
     ),
@@ -2700,7 +2727,7 @@ _M11_L3 = {
     "details": "ج (tongue_blade affricate) recited as ز (sibilant) — stop phase omitted",
     "letter_feedback": _LF_W12_LETTER_C11,
     "tajweed_detail": _tj(
-        "tongue_middle", "sibilant",
+        "ج", "tongue_middle", "ز", "sibilant",
         "ج is a palatal affricate (stop + fricative) from وسط اللسان. "
         "Complete the initial closure of the tongue blade against the palate before "
         "releasing into the fricative — do not skip to a simple ز buzz."
@@ -2712,7 +2739,7 @@ _M11_L4 = {
     "details": "ط (alveolar emphatic) recited as ت (alveolar plain) — tafkheem missing",
     "letter_feedback": _LF_W18_LETTER_C11,
     "tajweed_detail": _tj(
-        "alveolar", "alveolar",
+        "ط", "alveolar", "ت", "alveolar",
         "ط shares the alveolar makhraj with ت but carries tafkheem (تفخيم) — "
         "the tongue body must raise toward the soft palate to 'thicken' the sound. "
         "Practice saying ط with a noticeably 'heavy' quality compared to the light ت."
@@ -2820,7 +2847,7 @@ _LF_W2_LETTER_C12 = [
     {"position": 2, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
     {"position": 3, "expected_letter": "ق", "recited_letter": "ك", "status": "letter_error",
      "tajweed_detail": _tj(
-         "velar", "velar",
+         "ق", "velar", "ك", "velar",
          "Both ق and ك are velar (أقصى اللسان) stops, but ق is articulated further back — "
          "the very back of the tongue presses against the soft palate to produce a deeper, "
          "emphatic (مفخم) quality. "
@@ -2844,7 +2871,7 @@ _LF_W4_LETTER_C12 = [
     {"position": 4,  "expected_letter": "ِ", "recited_letter": "ِ", "status": "correct"},
     {"position": 5,  "expected_letter": "ن", "recited_letter": "ل", "status": "letter_error",
      "tajweed_detail": _tj(
-         "nasal", "lateral",
+         "ن", "nasal", "ل", "lateral",
          "ن (nūn) is a nasal stop: the tongue tip touches the gum ridge while air flows "
          "through the nasal cavity (الخيشوم), producing resonance in the nose. "
          "ل (lām) is a lateral: the tongue tip also touches the gum ridge but the velum "
@@ -2866,7 +2893,7 @@ _LF_W6_LETTER_C12 = [
     {"position": 2, "expected_letter": "ْ", "recited_letter": "ْ", "status": "correct"},
     {"position": 3, "expected_letter": "ب", "recited_letter": "م", "status": "letter_error",
      "tajweed_detail": _tj(
-         "lips", "nasal",
+         "ب", "lips", "م", "nasal",
          "Both ب and م are bilabial (الشفتان) stops formed by pressing the lips together. "
          "The difference is the velum: for ب the velum is raised (oral stop, no nasality); "
          "for م the velum is lowered so air flows through the nose (الخيشوم), giving it a hum. "
@@ -2891,7 +2918,7 @@ _LF_W16_LETTER_C12 = [
     {"position": 5,  "expected_letter": "ي", "recited_letter": "ي", "status": "correct"},
     {"position": 6,  "expected_letter": "ز", "recited_letter": "س", "status": "letter_error",
      "tajweed_detail": _tj(
-         "sibilant", "sibilant",
+         "ز", "sibilant", "س", "sibilant",
          "Both ز and س are sibilant sounds (الأسنان واللسان) with the same tongue position, "
          "but ز is voiced (the vocal cords vibrate — feel the buzz in the throat) while "
          "س is voiceless (vocal cords do not vibrate). "
@@ -2929,7 +2956,7 @@ _M12_L1 = {
     "details": "ق (velar, back) recited as ك (velar, front) — tongue not far enough back",
     "letter_feedback": _LF_W2_LETTER_C12,
     "tajweed_detail": _tj(
-        "velar", "velar",
+        "ق", "velar", "ك", "velar",
         "ق needs the tongue root pressed against the very back of the soft palate (أقصى اللسان). "
         "Move the contact point further back to produce the deeper, emphatic ق — "
         "not the lighter ك which is slightly more forward."
@@ -2941,7 +2968,7 @@ _M12_L2 = {
     "details": "ن (nasal resonance) recited as ل (lateral) — nasal cavity not engaged",
     "letter_feedback": _LF_W4_LETTER_C12,
     "tajweed_detail": _tj(
-        "nasal", "lateral",
+        "ن", "nasal", "ل", "lateral",
         "ن requires nasal resonance (الخيشوم) — lower the velum to let air pass through the nose. "
         "If the velum stays raised the nasal quality disappears, "
         "and the sound becomes ل (a lateral with airflow over the tongue sides)."
@@ -2953,7 +2980,7 @@ _M12_L3 = {
     "details": "ب (oral bilabial) recited as م (nasal bilabial) — nose not properly closed off",
     "letter_feedback": _LF_W6_LETTER_C12,
     "tajweed_detail": _tj(
-        "lips", "nasal",
+        "ب", "lips", "م", "nasal",
         "ب and م both seal the lips (الشفتان), but ب releases without nasal resonance. "
         "Raise the soft palate (velum) to block the nasal cavity — "
         "the burst of air should exit only through the mouth."
@@ -2965,7 +2992,7 @@ _M12_L4 = {
     "details": "ز (voiced sibilant) recited as س (unvoiced sibilant) — vocal cords not vibrating",
     "letter_feedback": _LF_W16_LETTER_C12,
     "tajweed_detail": _tj(
-        "sibilant", "sibilant",
+        "ز", "sibilant", "س", "sibilant",
         "ز and س share the same tongue-tip-to-gum-ridge position (الأسنان واللسان). "
         "The only difference is voicing: activate the vocal cords for ز. "
         "Place fingers lightly on the larynx — you should feel vibration for ز but not for س."
